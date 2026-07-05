@@ -125,8 +125,9 @@ like($app, qr/\.module-card h2 \{ min-width: 0;[\s\S]*?overflow-wrap: anywhere;/
 like($app, qr/\.donut-legend li strong \{ min-width: 0; overflow-wrap: anywhere; white-space: normal; \}/, 'admin donut legends wrap long labels instead of truncating them');
 like($app, qr/\.upgrade-file-state \{ display: inline-flex;[\s\S]*?overflow-wrap: anywhere; white-space: normal; \}/, 'admin upgrade file state wraps long archive names');
 
-like($http, qr{admin\.css\?v=20260705a}, 'admin CSS cache key includes site-tool module navigation polish');
-like($http, qr{editor\.js\?v=20260705a}, 'admin JS cache key stays aligned with admin assets');
+like($http, qr{admin\.css\?v=\$admin_css_version}, 'admin CSS cache key is supplied from the rendered site settings');
+like($http, qr{editor\.js\?v=20260705b}, 'admin JS cache key stays aligned with admin assets');
+like($app, qr/'Cache-Control'\s*=>\s*'private, max-age=31536000, immutable'/, 'admin CSS can be cached behind the settings-derived asset key');
 
 done_testing;
 

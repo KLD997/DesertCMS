@@ -198,13 +198,13 @@ sub _build_downloads {
             kind        => 'Source',
             filename    => "desertcms-source-$release.tar.gz",
             description => 'Full source tree with tests, docs, installer examples, templates, themes, and OpenBSD tooling.',
-            items       => [qw(.gitignore README.md VERSION admin bin docs etc install lib public sql t themes tools)],
+            items       => [qw(.gitignore LICENSE README.md VERSION admin bin docs etc install lib public sql t themes tools)],
         },
         {
             kind        => 'OpenBSD runtime bundle',
             filename    => "desertcms-openbsd-runtime-$release.tar.gz",
             description => 'Ready-to-place application bundle for OpenBSD httpd, slowcgi, SQLite, and the included installer scripts.',
-            items       => [qw(README.md VERSION admin bin docs etc install lib public sql themes tools)],
+            items       => [qw(LICENSE README.md VERSION admin bin docs etc install lib public sql themes tools)],
         },
     );
 

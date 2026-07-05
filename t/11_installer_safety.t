@@ -196,6 +196,8 @@ like($marketing_seed, qr/use File::Find qw\(find\)/, 'marketing seeder can repai
 like($marketing_seed, qr/sub _repair_public_root_ownership/, 'marketing seeder has a public-root ownership repair step');
 like($marketing_seed, qr/return unless \$> == 0;/, 'marketing seeder only repairs ownership when run as root');
 like($marketing_seed, qr/chown \$uid, \$gid, \$path/, 'marketing seeder restores generated files to the public-root owner and group');
+like($marketing_seed, qr/Source[\s\S]*?items\s*=>\s*\[qw\([^]]*LICENSE/s, 'source release archive includes the BSD license');
+like($marketing_seed, qr/OpenBSD runtime bundle[\s\S]*?items\s*=>\s*\[qw\([^]]*LICENSE/s, 'runtime release archive includes the BSD license');
 
 my $slowcgi_rc = _read("$FindBin::Bin/../etc/rc.d/desertcms_slowcgi");
 like($slowcgi_rc, qr/daemon_flags="-p \/ -u _desertcms -s \/var\/www\/run\/desertcms\.sock"/, 'slowcgi runs CGI as service user while keeping socket connectable by httpd');

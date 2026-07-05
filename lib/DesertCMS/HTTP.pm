@@ -2,7 +2,7 @@ package DesertCMS::HTTP;
 
 use strict;
 use warnings;
-use Encode qw(encode_utf8 is_utf8);
+use Encode qw(FB_DEFAULT decode encode_utf8 is_utf8);
 use Socket qw(AF_INET AF_INET6 inet_pton);
 use DesertCMS::GeoIP ();
 use DesertCMS::Util qw(parse_urlencoded url_decode escape_html);
@@ -216,7 +216,7 @@ sub _parse_multipart {
                 content => $content,
             };
         } else {
-            $form{$name} = $content;
+            $form{$name} = decode('UTF-8', $content, FB_DEFAULT);
         }
     }
 
@@ -291,6 +291,7 @@ sub html_page {
     my $brand = $args{brand} || 'DesertCMS';
     my $default_theme_mode = ($args{default_theme_mode} || '') eq 'dark' ? 'dark' : 'light';
     my $product_mode = ($args{product_mode} || '') eq 'contributor' ? 'contributor' : 'master';
+    my $admin_css_version = escape_html($args{admin_css_version} || '20260705b');
     my $topbar_class = $product_mode eq 'contributor' ? 'topbar contributor-topbar' : 'topbar';
     my $topbar_actions_class = $product_mode eq 'contributor' ? 'topbar-actions contributor-topbar-actions' : 'topbar-actions';
     my $admin_menu_toggle = length($user_nav)
@@ -304,9 +305,9 @@ sub html_page {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$title</title>
-  <link rel="stylesheet" href="/admin/assets/admin.css?v=20260705a">
+  <link rel="stylesheet" href="/admin/assets/admin.css?v=$admin_css_version">
   <script src="/admin/assets/map.js?v=20260703l" defer></script>
-  <script src="/admin/assets/editor.js?v=20260705a" defer></script>
+  <script src="/admin/assets/editor.js?v=20260705b" defer></script>
 </head>
 <body class="admin-product-mode--$product_mode">
   <header class="$topbar_class">

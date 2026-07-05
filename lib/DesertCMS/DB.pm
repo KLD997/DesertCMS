@@ -7,6 +7,8 @@ use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Spec;
 
+use constant CURRENT_SCHEMA_VERSION => 2026070501;
+
 sub new {
     my ($class, %args) = @_;
     die "config is required" unless $args{config};
@@ -213,6 +215,13 @@ sub migrate {
         $self->_ensure_columns('federated_content_reviews', {
             source_missing_at => "INTEGER",
         });
+        $dbh->do(
+            'INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)',
+            undef,
+            CURRENT_SCHEMA_VERSION,
+            time,
+        );
+        delete $self->{_settings_cache};
         $dbh->commit;
         1;
     } or do {
@@ -220,6 +229,29 @@ sub migrate {
         eval { $dbh->rollback };
         die $err;
     };
+}
+
+sub migrate_if_needed {
+    my ($self) = @_;
+    return 0 if $self->schema_current;
+    $self->migrate;
+    return 1;
+}
+
+sub schema_current {
+    my ($self) = @_;
+    my $dbh = $self->dbh;
+    my ($has_table) = eval {
+        $dbh->selectrow_array(
+            q{SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'}
+        );
+    };
+    return 0 if $@ || !$has_table;
+    my ($version) = eval {
+        $dbh->selectrow_array('SELECT MAX(version) FROM schema_migrations');
+    };
+    return 0 if $@;
+    return int($version || 0) >= CURRENT_SCHEMA_VERSION ? 1 : 0;
 }
 
 sub _ensure_columns {

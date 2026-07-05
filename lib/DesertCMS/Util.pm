@@ -3,6 +3,7 @@ package DesertCMS::Util;
 use strict;
 use warnings;
 use Digest::SHA qw(hmac_sha256 sha256_hex);
+use Encode qw(FB_DEFAULT decode);
 use Exporter 'import';
 
 our @EXPORT_OK = qw(
@@ -74,7 +75,7 @@ sub url_decode {
     $value = '' unless defined $value;
     $value =~ tr/+/ /;
     $value =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
-    return $value;
+    return decode('UTF-8', $value, FB_DEFAULT);
 }
 
 sub parse_urlencoded {

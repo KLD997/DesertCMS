@@ -673,6 +673,7 @@ sub settings {
 sub clear_settings_cache {
     my ($self) = @_;
     delete $self->{settings_cache};
+    delete $self->{settings_cache_generation};
     return 1;
 }
 
@@ -961,18 +962,23 @@ sub _is_shop_route_path {
 
 sub _settings {
     my ($self) = @_;
-    $self->{settings_cache} ||= do {
-        my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
-        if (DesertCMS::Commerce::is_contributor_instance($self->{config})
-            && DesertCMS::Commerce::model($self->{config}, $settings) eq 'platform_marketplace') {
-            my $master = _master_stripe_settings($self);
-            for my $key (qw(stripe_secret_key stripe_webhook_secret stripe_api_base)) {
-                $settings->{$key} = $master->{$key}
-                    if $master && length($master->{$key} || '');
-            }
+    if ($self->{settings_cache}
+        && defined $self->{settings_cache_generation}
+        && $self->{settings_cache_generation} == $DesertCMS::Settings::SETTINGS_GENERATION) {
+        return $self->{settings_cache};
+    }
+
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    if (DesertCMS::Commerce::is_contributor_instance($self->{config})
+        && DesertCMS::Commerce::model($self->{config}, $settings) eq 'platform_marketplace') {
+        my $master = _master_stripe_settings($self);
+        for my $key (qw(stripe_secret_key stripe_webhook_secret stripe_api_base)) {
+            $settings->{$key} = $master->{$key}
+                if $master && length($master->{$key} || '');
         }
-        $settings;
-    };
+    }
+    $self->{settings_cache} = $settings;
+    $self->{settings_cache_generation} = $DesertCMS::Settings::SETTINGS_GENERATION;
     return $self->{settings_cache};
 }
 

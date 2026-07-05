@@ -9,8 +9,20 @@ use JSON::PP qw(decode_json encode_json);
 use DesertCMS::Commerce;
 use DesertCMS::Util qw(now);
 
+our $SETTINGS_GENERATION = 0;
+
 sub all {
     my ($config, $db) = @_;
+    my $config_cache_key = defined $config ? "$config" : '';
+    if ($db
+        && $db->{_settings_cache}
+        && defined $db->{_settings_cache_generation}
+        && $db->{_settings_cache_generation} == $SETTINGS_GENERATION
+        && defined $db->{_settings_cache_config_key}
+        && $db->{_settings_cache_config_key} eq $config_cache_key) {
+        return { %{ $db->{_settings_cache} } };
+    }
+
     my $shop_enabled = _default_shop_enabled($config);
     my $module_shop_enabled = $config->get('module_shop_enabled');
     $module_shop_enabled = defined($module_shop_enabled) && length($module_shop_enabled)
@@ -204,11 +216,17 @@ sub all {
     $settings{module_shop_enabled} = $settings{shop_enabled} if !$seen{module_shop_enabled} && $seen{shop_enabled};
     $settings{commerce_model} = DesertCMS::Commerce::model($config, \%settings);
 
-    return \%settings;
+    $db->{_settings_cache} = { %settings };
+    $db->{_settings_cache_generation} = $SETTINGS_GENERATION;
+    $db->{_settings_cache_config_key} = $config_cache_key;
+    return { %settings };
 }
 
 sub set_many {
     my ($config, $db, $values) = @_;
+    delete $db->{_settings_cache} if $db;
+    delete $db->{_settings_cache_generation} if $db;
+    delete $db->{_settings_cache_config_key} if $db;
     my $ts = now();
     my %allowed = map { $_ => 1 } qw(
         site_name site_description site_meta_title site_meta_description
@@ -270,6 +288,10 @@ sub set_many {
             $ts
         );
     }
+    $SETTINGS_GENERATION++;
+    delete $db->{_settings_cache} if $db;
+    delete $db->{_settings_cache_generation} if $db;
+    delete $db->{_settings_cache_config_key} if $db;
 }
 
 sub _config_truthy {

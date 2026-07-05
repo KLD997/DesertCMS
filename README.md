@@ -12,6 +12,8 @@ It is built around three major ideas:
 
 The formal hosted site is [desertcms.com](https://desertcms.com/).
 
+Current release: DesertCMS v2.0. The v2 launch includes faster backend request startup, cacheable admin assets, UTF-8 form decoding for rich text edits, and release artifacts at [desertcms.com/download](https://desertcms.com/download/).
+
 ## Documentation
 Start with:
 - [OpenBSD Install Guide](docs/OPENBSD_74_INSTALL.md)

@@ -59,7 +59,7 @@ use DesertCMS::Testimonials;
 use DesertCMS::TenantIsolation;
 use DesertCMS::Theme;
 use DesertCMS::Upgrade;
-use DesertCMS::Util qw(escape_html now random_hex slugify);
+use DesertCMS::Util qw(escape_html now random_hex sha256_hexstr slugify);
 use DesertCMS::Version;
 
 sub new {
@@ -119,7 +119,7 @@ sub run {
     DesertCMS::HTTP->reset_response_state;
     eval {
         $self->{config}->app_secret;
-        $self->{db}->migrate;
+        $self->{db}->migrate_if_needed;
         apply_openbsd_sandbox($self->{config}, $self->{db});
         my $request = DesertCMS::HTTP->read_request(
             max_body_bytes => $self->{config}->get('max_request_body_bytes'),
@@ -21541,6 +21541,7 @@ sub _html_response {
             user_nav => $nav,
             brand => _admin_brand_html($settings),
             default_theme_mode => $default_theme_mode,
+            admin_css_version => _admin_css_cache_key($settings),
             product_mode => $product_mode,
         ),
     );
@@ -21667,6 +21668,23 @@ sub _admin_security_headers {
     my ($self) = @_;
     my $settings = eval { DesertCMS::Settings::all($self->{config}, $self->{db}) } || {};
     return security_headers(img_src => _map_tile_origins($settings));
+}
+
+sub _admin_css_cache_key {
+    my ($settings) = @_;
+    $settings ||= {};
+    my @keys = qw(
+        theme_preset theme_light_preset theme_dark_preset theme_default_mode
+        theme_custom_name theme_custom_mode theme_custom_ink theme_custom_muted
+        theme_custom_paper theme_custom_panel theme_custom_field theme_custom_line
+        theme_custom_accent theme_custom_accent_dark theme_custom_support theme_custom_button_ink
+        theme_heading_font theme_body_font theme_ui_font theme_heading_scale theme_body_scale
+        theme_button_style theme_button_radius theme_card_style theme_card_radius
+        site_background_image_path site_content_width site_spacing_scale site_logo_size site_logo_fit
+        site_logo_focal_x site_logo_focal_y site_logo_max_width_px site_logo_max_height_px
+    );
+    my $fingerprint = join "\0", map { $_ . '=' . ($settings->{$_} // '') } @keys;
+    return '20260705b-' . substr(sha256_hexstr($fingerprint), 0, 12);
 }
 
 sub _map_tile_origins {
@@ -23031,7 +23049,7 @@ CSS
         status  => 200,
         headers => {
             'Content-Type' => 'text/css; charset=utf-8',
-            'Cache-Control' => 'no-store',
+            'Cache-Control' => 'private, max-age=31536000, immutable',
         },
         body => $css,
     );
