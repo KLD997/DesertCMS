@@ -198,6 +198,10 @@ like($marketing_seed, qr/return unless \$> == 0;/, 'marketing seeder only repair
 like($marketing_seed, qr/chown \$uid, \$gid, \$path/, 'marketing seeder restores generated files to the public-root owner and group');
 like($marketing_seed, qr/Source[\s\S]*?items\s*=>\s*\[qw\([^]]*LICENSE/s, 'source release archive includes the BSD license');
 like($marketing_seed, qr/OpenBSD runtime bundle[\s\S]*?items\s*=>\s*\[qw\([^]]*LICENSE/s, 'runtime release archive includes the BSD license');
+like($marketing_seed, qr/my \@release_excludes = qw\([\s\S]*?\.codex \.codex\/\*[\s\S]*?\.tools \.tools\/\*[\s\S]*?data data\/\* dist dist\/\* local local\/\*[\s\S]*?\*\.tar\.gz \*\.tgz \*\.zip[\s\S]*?\*\.ps1 \*\.cmd \*\.bat \*\.exe \*\.dll/s, 'release archives exclude Codex, local toolchains, old archives, databases, logs, and Windows helpers');
+like($marketing_seed, qr/OpenBSD runtime bundle[\s\S]*?bin\/desertcms\.cgi bin\/desertcms-maint\.pl[\s\S]*?tools\/openbsd-apply-upgrade\.pl[\s\S]*?tools\/openbsd-validate\.pl/s, 'runtime release archive explicitly lists OpenBSD host entrypoints and workers');
+unlike($marketing_seed, qr/OpenBSD runtime bundle[\s\S]*?bin\/desertcms-dev-server\.pl/s, 'runtime release archive omits the local development server');
+unlike($marketing_seed, qr/OpenBSD runtime bundle[\s\S]*?seed-desertcms-marketing-site\.pl/s, 'runtime release archive omits the marketing-site seeder');
 
 my $slowcgi_rc = _read("$FindBin::Bin/../etc/rc.d/desertcms_slowcgi");
 like($slowcgi_rc, qr/daemon_flags="-p \/ -u _desertcms -s \/var\/www\/run\/desertcms\.sock"/, 'slowcgi runs CGI as service user while keeping socket connectable by httpd');

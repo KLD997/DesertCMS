@@ -3,9 +3,12 @@
 use strict;
 use warnings;
 use Digest::SHA qw(sha256_hex);
+use File::Basename qw(dirname);
+use File::Copy qw(copy);
 use File::Find qw(find);
 use File::Path qw(make_path remove_tree);
 use File::Spec;
+use File::Temp qw(tempdir);
 use FindBin;
 use Getopt::Long qw(GetOptionsFromArray);
 use JSON::PP qw(encode_json);
@@ -192,6 +195,14 @@ sub _build_downloads {
     my $release = $opt->{release};
     $release =~ s/[^0-9A-Za-z._-]/-/g;
     my $app_root = File::Spec->rel2abs($opt->{app_root});
+    my @release_excludes = qw(
+        .git .git/* .github .github/*
+        .codex .codex/* .agents .agents/* .tools .tools/*
+        data data/* dist dist/* local local/*
+        *.tar.gz *.tgz *.zip *.sqlite *.sqlite-shm *.sqlite-wal *.log
+        *.ps1 *.cmd *.bat *.exe *.dll
+        .DS_Store Thumbs.db
+    );
 
     my @artifacts = (
         {
@@ -199,12 +210,26 @@ sub _build_downloads {
             filename    => "desertcms-source-$release.tar.gz",
             description => 'Full source tree with tests, docs, installer examples, templates, themes, and OpenBSD tooling.',
             items       => [qw(.gitignore LICENSE README.md VERSION admin bin docs etc install lib public sql t themes tools)],
+            excludes    => \@release_excludes,
         },
         {
             kind        => 'OpenBSD runtime bundle',
             filename    => "desertcms-openbsd-runtime-$release.tar.gz",
             description => 'Ready-to-place application bundle for OpenBSD httpd, slowcgi, SQLite, and the included installer scripts.',
-            items       => [qw(LICENSE README.md VERSION admin bin docs etc install lib public sql themes tools)],
+            items       => [qw(
+                LICENSE README.md VERSION admin
+                bin/desertcms.cgi bin/desertcms-maint.pl
+                docs etc install lib public sql themes
+                tools/check-local-assets.pl
+                tools/openbsd-apply-font-packages.pl
+                tools/openbsd-apply-site-queue.pl
+                tools/openbsd-apply-upgrade.pl
+                tools/openbsd-operations-worker.pl
+                tools/openbsd-provision-site.pl
+                tools/openbsd-register-existing-site.pl
+                tools/openbsd-validate.pl
+            )],
+            excludes    => \@release_excludes,
         },
     );
 
@@ -213,8 +238,7 @@ sub _build_downloads {
         unlink $path if -f $path;
         my @items = grep { -e File::Spec->catfile($app_root, $_) } @{$artifact->{items}};
         die "no app files found under $app_root\n" unless @items;
-        system('tar', '-czf', $path, '-C', $app_root, @items) == 0
-            or die "tar failed for $artifact->{filename}\n";
+        _write_release_archive($path, $app_root, \@items, $artifact->{excludes} || []);
         chmod 0644, $path;
         my $sha = _sha256_file($path);
         my $sha_path = "$path.sha256";
@@ -229,6 +253,91 @@ sub _build_downloads {
     }
 
     return \@artifacts;
+}
+
+sub _write_release_archive {
+    my ($path, $app_root, $items, $excludes) = @_;
+    my $stage = tempdir('desertcms-release-XXXXXXXX', TMPDIR => 1, CLEANUP => 1);
+    for my $item (@{$items || []}) {
+        my $source = File::Spec->catfile($app_root, split m{/}, $item);
+        next unless -e $source;
+        my $target = File::Spec->catfile($stage, split m{/}, $item);
+        _copy_release_item($source, $target, _clean_release_member($item), $excludes);
+    }
+    opendir my $dh, $stage or die "cannot read release staging directory $stage: $!\n";
+    my @members = sort grep { $_ ne '.' && $_ ne '..' } readdir $dh;
+    closedir $dh;
+    die "release archive staging produced no files\n" unless @members;
+    system('tar', '-czf', $path, '-C', $stage, @members) == 0
+        or die "tar failed for " . File::Spec->abs2rel($path) . "\n";
+}
+
+sub _copy_release_item {
+    my ($source, $target, $relative, $excludes) = @_;
+    return if _release_member_excluded($relative, $excludes);
+    return if -l $source;
+    if (-d $source) {
+        make_path($target) unless -d $target;
+        _copy_mode($source, $target);
+        find(
+            {
+                no_chdir => 1,
+                wanted   => sub {
+                    return if $File::Find::name eq $source;
+                    my $child_relative = _clean_release_member(
+                        File::Spec->catfile($relative, File::Spec->abs2rel($File::Find::name, $source))
+                    );
+                    if (_release_member_excluded($child_relative, $excludes)) {
+                        $File::Find::prune = 1 if -d $File::Find::name;
+                        return;
+                    }
+                    return if -l $File::Find::name;
+                    my $child_target = File::Spec->catfile($target, File::Spec->abs2rel($File::Find::name, $source));
+                    if (-d $File::Find::name) {
+                        make_path($child_target) unless -d $child_target;
+                        _copy_mode($File::Find::name, $child_target);
+                    } elsif (-f $File::Find::name) {
+                        make_path(dirname($child_target)) unless -d dirname($child_target);
+                        copy($File::Find::name, $child_target)
+                            or die "cannot copy $File::Find::name to $child_target: $!\n";
+                        _copy_mode($File::Find::name, $child_target);
+                    }
+                },
+            },
+            $source
+        );
+    } elsif (-f $source) {
+        make_path(dirname($target)) unless -d dirname($target);
+        copy($source, $target) or die "cannot copy $source to $target: $!\n";
+        _copy_mode($source, $target);
+    }
+}
+
+sub _copy_mode {
+    my ($source, $target) = @_;
+    my @stat = stat($source);
+    chmod($stat[2] & 07777, $target) if @stat;
+}
+
+sub _release_member_excluded {
+    my ($relative, $patterns) = @_;
+    $relative = _clean_release_member($relative);
+    for my $pattern (@{$patterns || []}) {
+        my $re = quotemeta(_clean_release_member($pattern));
+        $re =~ s/\\\*/.*/g;
+        return 1 if $relative =~ /\A$re\z/;
+    }
+    return 0;
+}
+
+sub _clean_release_member {
+    my ($path) = @_;
+    $path = '' unless defined $path;
+    $path =~ s{\\}{/}g;
+    $path =~ s{/+}{/}g;
+    $path =~ s{\A\./}{};
+    $path =~ s{/\z}{};
+    return $path;
 }
 
 sub _home_body_json {
