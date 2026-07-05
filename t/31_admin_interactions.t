@@ -117,7 +117,7 @@ for my $expected (
 like($app, qr{data-loading-label="Rebuilding\.\.\."}, 'search-engine submit form has a rebuild loading label');
 like($app, qr{data-loading-label="Queueing\.\.\."}, 'queue actions can opt into a queueing loading label');
 like($http, qr{admin\.css\?v=\$admin_css_version}, 'admin CSS cache key is supplied from rendered site settings');
-like($http, qr{editor\.js\?v=20260705b}, 'admin JS cache key is bumped');
+like($http, qr{editor\.js\?v=20260705c}, 'admin JS cache key is bumped');
 like($http, qr{<html lang="en" data-theme="\$default_theme_mode">}, 'admin shell renders default theme without inline bootstrap');
 unlike($http, qr{<script>\s*document\.documentElement\.classList\.add\('has-js'\)}s, 'admin shell does not depend on inline has-js bootstrap');
 like($app, qr{document\.documentElement\.classList\.add\('has-js'\);}, 'external admin JavaScript marks JS-ready state');

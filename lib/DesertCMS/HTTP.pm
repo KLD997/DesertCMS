@@ -291,7 +291,7 @@ sub html_page {
     my $brand = $args{brand} || 'DesertCMS';
     my $default_theme_mode = ($args{default_theme_mode} || '') eq 'dark' ? 'dark' : 'light';
     my $product_mode = ($args{product_mode} || '') eq 'contributor' ? 'contributor' : 'master';
-    my $admin_css_version = escape_html($args{admin_css_version} || '20260705b');
+    my $admin_css_version = escape_html($args{admin_css_version} || '20260705c');
     my $topbar_class = $product_mode eq 'contributor' ? 'topbar contributor-topbar' : 'topbar';
     my $topbar_actions_class = $product_mode eq 'contributor' ? 'topbar-actions contributor-topbar-actions' : 'topbar-actions';
     my $admin_menu_toggle = length($user_nav)
@@ -307,7 +307,7 @@ sub html_page {
   <title>$title</title>
   <link rel="stylesheet" href="/admin/assets/admin.css?v=$admin_css_version">
   <script src="/admin/assets/map.js?v=20260703l" defer></script>
-  <script src="/admin/assets/editor.js?v=20260705b" defer></script>
+  <script src="/admin/assets/editor.js?v=20260705c" defer></script>
 </head>
 <body class="admin-product-mode--$product_mode">
   <header class="$topbar_class">

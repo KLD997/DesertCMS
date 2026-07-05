@@ -122,10 +122,9 @@ my $events_module_html = _capture_response(sub {
 like($events_module_html, qr/module-setup-nav" aria-label="Module setup pages"><a href="\/admin\/settings\/modules" class="module-setup-nav-home"><strong>Modules<\/strong><small>Module Catalog<\/small><span>Module parent<\/span><\/a><span class="module-setup-nav-groups">.*data-module-setup-group="modules".*<span class="module-setup-nav-group-title">Core Modules<\/span>.*href="\/admin\/settings\/modules\/events" class="active" aria-current="page">Events<\/a>.*href="\/admin\/settings\/modules\/directory">Directory<\/a>.*href="\/admin\/settings\/modules\/bookings">Bookings \/ Appointments<\/a>.*href="\/admin\/settings\/modules\/membership">Membership \/ Gated Content<\/a>.*href="\/admin\/settings\/modules\/newsletter">Newsletter<\/a>.*href="\/admin\/settings\/modules\/donations">Donations \/ Fundraising<\/a>.*href="\/admin\/settings\/modules\/testimonials">Testimonials \/ Reviews<\/a>.*href="\/admin\/settings\/modules\/shop">Shop \/ Catalog<\/a>.*data-module-setup-group="tools".*<span class="module-setup-nav-group-title">Site Tool Modules<\/span>/s, 'module detail pages render grouped Modules setup nav with active first-party module');
 unlike($events_module_html, qr/<nav class="editor-nav" aria-label="Editor sections">/, 'module detail pages do not borrow editor navigation');
 unlike($events_module_html, qr/>Shop Payments<\/a>|>Event Payments<\/a>|>Donation Payments<\/a>|>Booking Deposits<\/a>|>Membership Payments<\/a>/, 'payment entitlements stay inside parent module setup pages, not module nav');
-like($modules_admin_html, qr/<h2>Map \/ Locations<\/h2>.*stores, venues, project locations, historical sites, event locations, service areas/s, 'module catalog presents generalized Map / Locations feature');
-like($modules_admin_html, qr/data-feature-key="events".*href="\/admin\/settings\/modules\/events"/s, 'module catalog keeps Events setup under Modules');
-like($modules_admin_html, qr/data-feature-key="testimonials".*href="\/admin\/settings\/modules\/testimonials"/s, 'module catalog keeps Testimonials setup under Modules');
-like($modules_admin_html, qr/<h2>Showcase<\/h2>.*\/showcase\//s, 'module catalog presents Showcase with the public showcase path');
+like($modules_admin_html, qr/module-catalog-landing" id="module-catalog-workspace".*<h2>Module setup<\/h2>/s, 'module catalog landing renders a single setup workspace below the grouped nav');
+like($modules_admin_html, qr/href="\/admin\/settings\/modules\/events">Events<\/a>.*href="\/admin\/settings\/modules\/testimonials">Testimonials \/ Reviews<\/a>.*href="\/admin\/settings\/modules\/map">Map \/ Locations<\/a>.*href="\/admin\/settings\/modules\/showcase">Showcase<\/a>/s, 'module setup nav keeps first-party module edit pages available');
+unlike($modules_admin_html, qr/<div class="module-grid">|module-card-kicker|data-feature-key="events"|data-feature-key="map"/, 'module catalog no longer repeats the module list as body cards');
 like($modules_admin_html, qr/href="\/admin\/settings\/modules\/showcase"/, 'module catalog links to Showcase settings');
 my $showcase_settings_html = _capture_response(sub {
     $app->_module_showcase_settings_page(undef, { username => 'admin', role => 'owner' }, 'showcase-session');
@@ -436,14 +435,9 @@ my $feature_catalog_html = _capture_response(sub {
 like($feature_catalog_html, qr/<h1>Features<\/h1>/, 'contributor feature catalog uses product heading');
 like($feature_catalog_html, qr/<a href="\/admin\/settings\/modules" class="active" aria-current="page">Features<\/a>/, 'contributor feature catalog marks Features active in product navigation');
 unlike($feature_catalog_html, qr/<nav class="editor-nav" aria-label="Site builder sections">/, 'contributor feature catalog does not borrow site builder navigation');
-like($feature_catalog_html, qr/module-card-kicker">Feature<\/span>/, 'contributor feature catalog cards use feature language');
-like($feature_catalog_html, qr/Save features and rebuild/, 'contributor feature catalog uses feature save label');
-like($feature_catalog_html, qr/data-feature-key="forms"[^>]+data-feature-locked-by-plan="1"/, 'feature catalog renders locked-by-plan state');
-like($feature_catalog_html, qr/data-feature-key="resource_publishing"[^>]+data-feature-locked-by-plan="1"/, 'feature catalog renders Resource Downloads locked-by-plan state');
-like($feature_catalog_html, qr/data-feature-key="forms"[^>]+data-feature-requires-upgrade="1"/, 'feature catalog renders upgrade-required state');
-like($feature_catalog_html, qr/data-feature-key="shop_payments"[^>]+data-feature-locked-by-plan="1"/, 'feature catalog renders Shop Payments locked-by-plan state');
-like($feature_catalog_html, qr/data-feature-key="contributor_requests"[^>]+data-feature-managed-by-master="1"/, 'feature catalog renders master-managed state');
-like($feature_catalog_html, qr/View upgrade options/, 'locked feature card points to upgrade options');
+like($feature_catalog_html, qr/module-catalog-landing" id="module-catalog-workspace".*<h2>Feature setup<\/h2>/s, 'contributor feature catalog renders one setup workspace below the grouped nav');
+like($feature_catalog_html, qr/Locked by plan.*<strong>\d+<\/strong>/s, 'contributor feature catalog summary still reports locked feature counts');
+unlike($feature_catalog_html, qr/module-card-kicker|Save features and rebuild|data-feature-key=|View upgrade options/, 'contributor feature catalog no longer repeats plan features as body cards');
 unlike($feature_catalog_html, qr/<h1>Modules<\/h1>|Managed by master|master CMS|contributor CMS/, 'contributor feature catalog avoids backend module/master language');
 my $contributor_module_detail_nav = DesertCMS::App::_editor_nav('events', $contrib_config, { role => 'owner' });
 is($contributor_module_detail_nav, '', 'contributor feature detail pages do not render site builder peer navigation');

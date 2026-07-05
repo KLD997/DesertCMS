@@ -319,8 +319,8 @@ local $app->{config} = $contrib_config;
 my $feature_catalog_html = _capture_response(sub {
     $app->_settings_modules_page(undef, { username => 'admin', role => 'owner' }, 'modules-session');
 });
-like($feature_catalog_html, qr/data-feature-key="donations"[^>]+data-feature-available="1"/, 'feature catalog renders Donations available by plan');
-like($feature_catalog_html, qr/data-feature-key="donation_payments"/, 'feature catalog renders Donation Payments feature card');
+like($feature_catalog_html, qr/module-catalog-landing" id="module-catalog-workspace".*<h2>Feature setup<\/h2>/s, 'feature catalog renders one setup workspace below the grouped nav');
+unlike($feature_catalog_html, qr/data-feature-key=|module-card-kicker/, 'feature catalog no longer repeats Donations or Donation Payments as body cards');
 unlike($feature_catalog_html, qr/master CMS|contributor CMS/, 'contributor feature catalog avoids backend CMS terminology');
 
 done_testing;

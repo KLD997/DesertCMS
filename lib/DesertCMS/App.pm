@@ -14585,7 +14585,6 @@ sub _sites_notice {
 
 sub _settings_modules_page {
     my ($self, $request, $session, $session_token, $message) = @_;
-    my $csrf = $self->{auth}->csrf_token($session_token);
     my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
     my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
     my $settings_nav = $self->_module_setup_nav('modules', $session, $settings);
@@ -14595,8 +14594,11 @@ sub _settings_modules_page {
     my $surface_intro = $is_contributor_product
         ? 'Features available on your plan. Turn included features on or off, review locked upgrades, and open setup for each feature.'
         : 'A module is an optional first-party feature bundle. Enabling one can add a public subpage, generated assets, and its own admin controls.';
-    my $card_kicker = $is_contributor_product ? 'Feature' : 'Module';
-    my $settings_link_label = $is_contributor_product ? 'Configure' : 'Settings';
+    my $catalog_label = $is_contributor_product ? 'Feature Catalog' : 'Module Catalog';
+    my $workspace_heading = $is_contributor_product ? 'Feature setup' : 'Module setup';
+    my $workspace_intro = $is_contributor_product
+        ? 'Feature setup pages open below the feature navigation with status, copy, routing, and plan-aware controls kept together.'
+        : 'Module setup pages open below the module navigation with status, copy, routing, and module-specific controls kept together.';
     my $managed_label = $is_contributor_product ? 'Managed by platform' : 'Managed by master';
     my $managed_detail = $is_contributor_product
         ? 'Platform-controlled features inherited by this hosted site.'
@@ -14610,22 +14612,9 @@ sub _settings_modules_page {
     my $total_detail = $is_contributor_product
         ? 'First-party site features.'
         : 'First-party DesertCMS feature modules.';
-    my $save_label = $is_contributor_product ? 'Save features and rebuild' : 'Save modules and rebuild';
     my $response_title = $is_contributor_product ? 'Features' : 'Modules';
-    my $module_cards = '';
     my ($enabled_count, $available_count, $locked_count, $managed_count, $public_page_count) = (0, 0, 0, 0, 0);
     for my $module (@{DesertCMS::Modules::catalog($settings, config => $self->{config})}) {
-        my $key = escape_html($module->{key});
-        my $label = escape_html($module->{label});
-        my $description = escape_html($module->{description});
-        my $path = escape_html($module->{public_path});
-        my $settings_path = escape_html($module->{settings_path});
-        my $checked = $module->{enabled} ? 'checked' : '';
-        my $available_attr = $module->{available} ? 1 : 0;
-        my $enabled_attr = $module->{enabled} ? 1 : 0;
-        my $locked_attr = $module->{locked_by_plan} ? 1 : 0;
-        my $upgrade_attr = $module->{requires_upgrade} ? 1 : 0;
-        my $managed_attr = $module->{managed_by_master} ? 1 : 0;
         if ($module->{enabled}) {
             $enabled_count++;
             $public_page_count++ if length($module->{public_path} || '');
@@ -14633,56 +14622,6 @@ sub _settings_modules_page {
         $available_count++ if $module->{available};
         $locked_count++ if $module->{locked_by_plan};
         $managed_count++ if $module->{managed_by_master};
-        my $card_class = $module->{enabled}
-            ? 'module-card module-card--enabled'
-            : ($module->{locked_by_plan}
-                ? 'module-card module-card--locked'
-                : ($module->{managed_by_master}
-                    ? 'module-card module-card--managed'
-                    : 'module-card module-card--disabled'));
-        my $state = $module->{enabled}
-            ? '<span class="status-pill ok">Enabled</span>'
-            : ($module->{locked_by_plan}
-                ? '<span class="status-pill warn">Requires upgrade</span>'
-                : ($module->{managed_by_master}
-                    ? '<span class="status-pill status-pill--neutral">' . $managed_label . '</span>'
-                    : '<span class="status-pill status-pill--neutral">Available</span>'));
-        my $control = '';
-        if ($module->{available} && length($module->{form_field} || '')) {
-            $control = <<"HTML";
-    <label class="checkbox-field">
-      <input type="checkbox" name="module_${key}_enabled" value="1" $checked>
-      <span>Enabled</span>
-    </label>
-    <a class="button-link secondary" href="$settings_path">$settings_link_label</a>
-HTML
-        } elsif ($module->{available}) {
-            $control = <<"HTML";
-    <span class="module-lock-note">Plan included</span>
-    <a class="button-link secondary" href="$settings_path">$settings_link_label</a>
-HTML
-        } elsif ($module->{locked_by_plan}) {
-            $control = <<"HTML";
-    <span class="module-lock-note">Locked by plan</span>
-    <a class="button-link secondary" href="/admin/billing">View upgrade options</a>
-HTML
-        } else {
-            $control = '<span class="module-lock-note">' . $managed_label . '</span>';
-        }
-        $module_cards .= <<"HTML";
-<article class="$card_class" data-feature-key="$key" data-feature-available="$available_attr" data-feature-enabled="$enabled_attr" data-feature-locked-by-plan="$locked_attr" data-feature-requires-upgrade="$upgrade_attr" data-feature-managed-by-master="$managed_attr">
-  <div>
-    <span class="module-card-kicker">$card_kicker</span>
-    <h2>$label</h2>
-    <p>$description</p>
-    <code>$path</code>
-  </div>
-  <div class="module-card-actions">
-    $state
-    $control
-  </div>
-</article>
-HTML
     }
     my $module_total = scalar @{DesertCMS::Modules::feature_keys()};
     my $modules_summary = _settings_summary_strip(
@@ -14707,15 +14646,16 @@ HTML
     </div>
     $notice
     $modules_summary
-    <form method="post" action="/admin/settings/modules/save" class="settings-form settings-form--wide">
-      <input type="hidden" name="csrf_token" value="$csrf">
-      <div class="module-grid">
-        $module_cards
+    <section class="inspector-panel module-catalog-landing" id="module-catalog-workspace">
+      <div class="split">
+        <div>
+          <p class="eyebrow">$catalog_label</p>
+          <h2>$workspace_heading</h2>
+          <p>$workspace_intro</p>
+        </div>
+        <span class="status-pill status-pill--neutral">$module_total catalogued</span>
       </div>
-      <div class="settings-form-actions settings-form-actions--sticky">
-        <button type="submit">$save_label</button>
-      </div>
-    </form>
+    </section>
   </section>
 </section>
 HTML
@@ -21684,7 +21624,7 @@ sub _admin_css_cache_key {
         site_logo_focal_x site_logo_focal_y site_logo_max_width_px site_logo_max_height_px
     );
     my $fingerprint = join "\0", map { $_ . '=' . ($settings->{$_} // '') } @keys;
-    return '20260705b-' . substr(sha256_hexstr($fingerprint), 0, 12);
+    return '20260705c-' . substr(sha256_hexstr($fingerprint), 0, 12);
 }
 
 sub _map_tile_origins {
@@ -22685,6 +22625,18 @@ form.is-submitting { cursor: progress; }
 .visual-block-settings--compact .tool-label { display: none; }
 .visual-block-settings--wide { width: min(236px, 100%); align-items: stretch; }
 .visual-block-settings--side.visual-block-settings--wide { width: min(236px, calc(100vw - 48px)); }
+.visual-block-settings--rich { position: static; width: 100%; max-width: 100%; display: none; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 10px; transform: none; }
+.visual-block.is-editing .visual-block-settings--rich { display: flex; opacity: 1; visibility: visible; pointer-events: auto; transform: none; }
+.visual-block-settings--rich.visual-block-settings--wide { width: 100%; max-width: 100%; }
+.visual-block-settings--rich .tool-label { align-self: center; }
+.visual-block-settings--rich .rich-text-tools { flex: 1 1 min(100%, 460px); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.visual-block-settings--rich .rich-color-tools { display: inline-flex; flex-wrap: wrap; max-width: 180px; }
+.visual-block-settings--rich .font-tool { flex: 0 0 auto; grid-auto-flow: column; grid-auto-columns: max-content; align-items: center; }
+.visual-block-settings--rich > label,
+.visual-block-settings--rich > .media-picker-control,
+.visual-block-settings--rich > .field-row { flex: 1 1 min(100%, 180px); }
+.visual-block-settings--rich .spacing-control { flex: 0 1 150px; min-width: min(150px, 100%); padding-top: 0; border-top: 0; }
+.visual-block-settings--rich .tool-close { align-self: center; margin-left: auto; }
 .visual-block-settings--wide label { min-width: 0; flex-direction: column; align-items: stretch; gap: 4px; }
 .visual-block-settings--wide input,
 .visual-block-settings--wide select { width: 100%; max-width: none; min-width: 0; }
@@ -22963,10 +22915,13 @@ body.has-admin-modal { overflow: hidden; }
   .visual-block-head .block-kind { order: -1; width: 100%; justify-content: center; }
   .visual-block-settings, .visual-block-settings--side { position: static; width: auto; max-width: none; flex-direction: row; align-items: center; flex-wrap: wrap; transform: none; margin-bottom: 8px; }
   .visual-block.is-editing .visual-block-settings, .visual-block.is-editing .visual-block-settings--side { transform: none; }
+  .visual-block.is-editing .visual-block-settings--rich { display: flex; }
   .visual-block-settings.visual-block-settings--compact .tool-label { display: inline-flex; }
   .visual-block-settings--compact .rich-text-tools, .visual-block-settings--wide .rich-text-tools, .visual-block-settings--side .rich-text-tools { display: inline-flex; flex-wrap: wrap; }
   .visual-block-settings--wide { width: auto; align-items: center; }
   .visual-block-settings--wide label { min-width: min(220px, 100%); }
+  .visual-block-settings--rich .spacing-control { min-width: min(220px, 100%); }
+  .visual-block-settings--rich .tool-close { margin-left: auto; }
   .visual-block-settings input, .visual-block-settings select { max-width: 100%; }
   .visual-block-settings--side .rich-tool-separator { width: 1px; height: 22px; margin: 0 2px; }
   .font-menu { left: 0; top: calc(100% + 8px); }
@@ -25149,7 +25104,7 @@ sub _editor_js {
                 { value: 'left', label: 'Image left' },
                 { value: 'right', label: 'Image right' }
               ], block.image_side) + '</select></label>',
-              'visual-block-settings--side visual-block-settings--wide',
+              'visual-block-settings--rich visual-block-settings--wide',
               block
             );
         } else if (block.type === 'heading') {
@@ -25158,10 +25113,10 @@ sub _editor_js {
             blockSettings('Heading', alignToolbar(block.align) + fontToolControls(block) + '<label><span>Level</span><select data-field="level">' + optionList([
               { value: '2', label: 'Section heading' },
               { value: '3', label: 'Subheading' }
-            ], String(block.level)) + '</select></label>', 'visual-block-settings--side visual-block-settings--wide', block);
+            ], String(block.level)) + '</select></label>', 'visual-block-settings--rich visual-block-settings--wide', block);
         } else if (block.type === 'quote') {
           fields =
-            blockSettings('Quote', alignToolbar(block.align) + fontToolControls(block) + '<label><span>Citation</span>' + inputField('citation', block.citation, 'Citation') + '</label>', 'visual-block-settings--side visual-block-settings--wide', block) +
+            blockSettings('Quote', alignToolbar(block.align) + fontToolControls(block) + '<label><span>Citation</span>' + inputField('citation', block.citation, 'Citation') + '</label>', 'visual-block-settings--rich visual-block-settings--wide', block) +
             '<blockquote class="' + alignClass(block.align) + ' ' + textStyleClass(block) + '" data-style-target="true"><p>' + inlineField('text', block.text, 'Quote text...', 'visual-quote-text') + '</p>' + (block.citation ? '<cite>' + escapeHtml(block.citation) + '</cite>' : '') + '</blockquote>';
         } else if (block.type === 'divider') {
           fields = blockSettings('Divider', '<span class="tool-note">Use this to separate page sections.</span>', '', block) + '<hr>';
@@ -25251,7 +25206,7 @@ sub _editor_js {
               block
             );
         } else {
-          fields = blockSettings('Text', richTextToolbar(block.align) + fontToolControls(block), 'visual-block-settings--side', block) + richTextField('text', block.html, block.text, 'Write directly on the page...', 'visual-rich-text ' + alignClass(block.align) + ' ' + textStyleClass(block)).replace('data-rich-field="true"', 'data-rich-field="true" data-style-target="true"');
+          fields = blockSettings('Text', richTextToolbar(block.align) + fontToolControls(block), 'visual-block-settings--rich visual-block-settings--wide', block) + richTextField('text', block.html, block.text, 'Write directly on the page...', 'visual-rich-text ' + alignClass(block.align) + ' ' + textStyleClass(block)).replace('data-rich-field="true"', 'data-rich-field="true" data-style-target="true"');
         }
 
         node.innerHTML =

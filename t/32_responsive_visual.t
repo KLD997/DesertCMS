@@ -87,9 +87,12 @@ like($app, qr/\.visual-block-toolbar \{ min-width: 0; position: sticky;[\s\S]*?f
 like($app, qr/\.visual-block-toolbar button \{ min-width: 0; max-width: 100%;[\s\S]*?white-space: normal; overflow-wrap: anywhere; \}/, 'admin visual block toolbar buttons wrap long block labels');
 like($app, qr/\.section-insert-control \{ min-width: min\(100%, 260px\); max-width: 100%; flex: 1 1 320px; display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(82px, auto\);/, 'admin reusable section insert control uses shrink-safe tracks');
 like($app, qr/\.visual-block-settings \{ min-width: 0; position: absolute;[\s\S]*?flex-wrap: wrap;/, 'admin visual block settings toolbar can shrink and wrap');
+like($app, qr/\.visual-block-settings--rich \{ position: static; width: 100%; max-width: 100%; display: none;[\s\S]*?flex-wrap: wrap;/, 'admin rich text block settings use an inline wrapping toolbar');
+like($app, qr/\.visual-block\.is-editing \.visual-block-settings--rich \{ display: flex;[\s\S]*?pointer-events: auto;/, 'admin rich text block settings become an inline toolbar while editing');
 like($app, qr/\.visual-block-settings label span \{ min-width: 0;[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere; \}/, 'admin visual block setting labels wrap instead of forcing toolbar width');
 like($app, qr/\.visual-block-settings input,\s*\.visual-block-settings select \{ width: min\(220px, 100%\); min-width: min\(116px, 100%\); max-width: 100%;/, 'admin visual block setting fields shrink inside compact toolbars');
 like($app, qr/\.rich-text-tools \{ min-width: 0; max-width: 100%;[\s\S]*?flex-wrap: wrap; \}/, 'admin rich text tool groups wrap inside block settings');
+like($app, qr/blockSettings\('Text', richTextToolbar\(block\.align\) \+ fontToolControls\(block\), 'visual-block-settings--rich visual-block-settings--wide', block\)/, 'admin rich text blocks render the inline rich toolbar instead of the side rail');
 like($app, qr/\.settings-form-actions \{[\s\S]*?flex-wrap: wrap;[\s\S]*?gap: 10px;/, 'admin sticky form actions wrap instead of squeezing');
 like($app, qr/label \{ min-width: 0; \}/, 'admin form labels can shrink inside dense setting grids');
 like($app, qr/input, select, textarea \{ width: 100%; min-width: 0;/, 'admin form controls shrink within grid columns');
@@ -126,7 +129,7 @@ like($app, qr/\.donut-legend li strong \{ min-width: 0; overflow-wrap: anywhere;
 like($app, qr/\.upgrade-file-state \{ display: inline-flex;[\s\S]*?overflow-wrap: anywhere; white-space: normal; \}/, 'admin upgrade file state wraps long archive names');
 
 like($http, qr{admin\.css\?v=\$admin_css_version}, 'admin CSS cache key is supplied from the rendered site settings');
-like($http, qr{editor\.js\?v=20260705b}, 'admin JS cache key stays aligned with admin assets');
+like($http, qr{editor\.js\?v=20260705c}, 'admin JS cache key stays aligned with admin assets');
 like($app, qr/'Cache-Control'\s*=>\s*'private, max-age=31536000, immutable'/, 'admin CSS can be cached behind the settings-derived asset key');
 
 done_testing;

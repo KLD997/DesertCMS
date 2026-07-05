@@ -46,6 +46,12 @@ doas perl install/openbsd-install.pl
 ```
 The installer sets up the CMS app, SQLite database, OpenBSD services, generated public site files, and a temporary first-login admin account.
 
+If you are applying the service steps manually, enable and start the DesertCMS slowcgi service:
+```sh
+doas rcctl enable desertcms_slowcgi
+doas rcctl start desertcms_slowcgi
+```
+
 ### 4. Validate production readiness
 After installation:
 ```sh
