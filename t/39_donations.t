@@ -110,6 +110,12 @@ my $campaign = $donations->save_campaign(
 ok($campaign->{id}, 'donation campaign is saved');
 is($campaign->{goal_amount_cents}, 500000, 'donation campaign stores goal amount in cents');
 is($campaign->{suggested_amounts_text}, '25.00, 50.00, 100.00', 'donation campaign stores normalized suggested amounts');
+my $auto_slug_campaign = $donations->save_campaign(
+    title   => 'Community Kitchen',
+    status  => 'draft',
+    summary => 'Draft fundraiser.',
+);
+is($auto_slug_campaign->{slug}, 'community-kitchen', 'donation campaign slug defaults to the campaign title instead of untitled');
 
 $content->rebuild_all;
 ok(-f File::Spec->catfile($root, 'public', 'donate', 'index.html'), 'donations index is generated');
@@ -122,10 +128,14 @@ like($home_html, qr{Support Us}, 'public navigation uses configured Donations ti
 my $donate_html = _read(File::Spec->catfile($root, 'public', 'donate', 'index.html'));
 like($donate_html, qr{Archive Fund}, 'donations index renders published campaign');
 like($donate_html, qr{Help preserve community materials}, 'donations index renders campaign summary');
+like($donate_html, qr{class="content module-page donations-page donations-shell"}, 'donations index uses the dedicated public donations shell');
+like($donate_html, qr{How to give.*Choose a campaign.*Select an amount.*Donate securely}s, 'donations index explains how visitors can donate');
+like($donate_html, qr{class="donation-card".*Donate to this campaign}s, 'donations index campaign card has an obvious donation action');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'donate', 'archive-fund', 'index.html'));
 like($detail_html, qr{Funds support scanning}, 'donation detail renders campaign body');
-like($detail_html, qr{USD 0\.00 raised of USD 5000\.00}, 'donation detail renders goal progress');
+like($detail_html, qr{donation-detail-layout.*Where your donation goes.*Donation options}s, 'donation detail separates campaign story from donation options');
+like($detail_html, qr{USD 0\.00.*of USD 5000\.00 goal}s, 'donation detail renders goal progress');
 like($detail_html, qr{Online donations are not available}, 'donation detail hides checkout when payments are not ready');
 unlike($detail_html, qr{Donate with Stripe}, 'donation detail omits Stripe button when checkout is unavailable');
 
@@ -142,6 +152,7 @@ my $public_detail = _capture_response(sub {
     $app->_dispatch_donations(_donation_request('/donate/archive-fund'));
 });
 like($public_detail, qr{Donor notes are welcome}, 'dynamic donation detail route renders campaign body');
+like($public_detail, qr{donation-panel--unavailable}, 'dynamic donation detail route renders styled unavailable payment state');
 
 my $admin_html = _capture_response(sub {
     $app->_module_donations_settings_page(undef, { username => 'admin', role => 'owner' }, 'donations-session');
@@ -209,6 +220,14 @@ DesertCMS::Settings::set_many($config, $db, {
 my $stripe = Local::DonationStripe->new;
 $donations = DesertCMS::Donations->new(config => $config, db => $db, http => $stripe);
 ok($donations->checkout_ready, 'donation checkout is ready when plan and Stripe settings allow it');
+{
+    local $app->{donations} = DesertCMS::Donations->new(config => $config, db => $db);
+    my $ready_detail = _capture_response(sub {
+        $app->_dispatch_donations(_donation_request('/donate/archive-fund'));
+    });
+    like($ready_detail, qr{donation-amount-grid.*USD 25\.00.*USD 50\.00.*USD 100\.00}s, 'ready donation detail renders styled suggested amount choices');
+    like($ready_detail, qr{Donate securely with Stripe}, 'ready donation detail renders clear Stripe checkout action');
+}
 my $checkout = $donations->create_checkout(
     campaign_id    => $campaign->{id},
     amount         => '50.00',

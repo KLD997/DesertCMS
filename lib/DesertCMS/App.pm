@@ -16152,18 +16152,28 @@ sub _donations_index {
     for my $campaign (@{ $self->{donations}->published_campaigns(limit => 500) }) {
         $cards .= $self->_donation_campaign_card($campaign);
     }
-    $cards ||= '<p class="events-empty">No fundraising campaigns yet.</p>';
+    $cards ||= '<p class="donation-empty">No fundraising campaigns yet.</p>';
     my $safe_title = escape_html($title);
     my $safe_intro = escape_html($intro);
     my $body = <<"HTML";
-<article class="content module-page donations-page events-shell">
-  <header class="events-hero">
-    <p class="kicker">Donations / Fundraising</p>
-    <h1>$safe_title</h1>
-    <p>$safe_intro</p>
+<article class="content module-page donations-page donations-shell">
+  <header class="donations-hero">
+    <div class="donations-hero-copy">
+      <p class="kicker">Donations / Fundraising</p>
+      <h1>$safe_title</h1>
+      <p>$safe_intro</p>
+    </div>
+    <aside class="donations-how-card" aria-label="How donations work">
+      <strong>How to give</strong>
+      <ol class="donations-steps">
+        <li><span>1</span><p><b>Choose a campaign</b><small>Pick the fund or project you want to support.</small></p></li>
+        <li><span>2</span><p><b>Select an amount</b><small>Use a suggested amount or enter a custom gift.</small></p></li>
+        <li><span>3</span><p><b>Donate securely</b><small>Checkout opens through the configured Stripe payment flow.</small></p></li>
+      </ol>
+    </aside>
   </header>
   $notice
-  <section class="events-grid donations-grid" aria-label="Fundraising campaigns">
+  <section class="donations-grid" aria-label="Fundraising campaigns">
     $cards
   </section>
 </article>
@@ -16176,25 +16186,34 @@ sub _donation_detail {
     my $campaign = $self->{donations}->campaign_by_slug($slug) or return $self->_not_found;
     my $title = escape_html($campaign->{title} || 'Donation campaign');
     my $summary = escape_html($campaign->{summary} || '');
-    my $body_text = escape_html($campaign->{body} || '');
-    $body_text =~ s{\n\n+}{</p><p>}g;
-    $body_text =~ s{\n}{<br>}g;
+    my $body_text = _donation_body_html($campaign->{body} || $campaign->{summary} || '');
     my $image = escape_html($campaign->{image_path} || '');
-    my $image_html = length $image ? qq{<img class="directory-detail-image" src="$image" alt="">} : '';
+    my $image_html = length $image ? qq{<figure class="donation-detail-media"><img src="$image" alt=""></figure>} : '';
     my $progress = $self->_donation_progress_html($campaign);
     my $form = $self->_donation_form_html($campaign);
     my $notice = $message ? '<p class="' . ($is_error ? 'notice error' : 'notice') . '">' . escape_html($message) . '</p>' : '';
     my $body = <<"HTML";
 <article class="content module-page donations-page donation-detail">
-  <p class="kicker">Donations / Fundraising</p>
-  <h1>$title</h1>
-  <p class="event-summary">$summary</p>
-  $image_html
-  $progress
-  <div class="body directory-body"><p>$body_text</p></div>
-  $notice
-  $form
-  <p><a href="/donate/">Back to donations</a></p>
+  <header class="donation-detail-hero">
+    <div class="donation-detail-copy">
+      <p class="kicker">Donations / Fundraising</p>
+      <h1>$title</h1>
+      <p class="donation-summary">$summary</p>
+    </div>
+    $image_html
+  </header>
+  <div class="donation-detail-layout">
+    <section class="donation-story" aria-labelledby="donation-story-heading">
+      <h2 id="donation-story-heading">Where your donation goes</h2>
+      <div class="body donation-body">$body_text</div>
+    </section>
+    <aside class="donation-sidebar" aria-label="Donation options">
+      $progress
+      $notice
+      $form
+    </aside>
+  </div>
+  <p class="donation-back"><a href="/donate/">Back to all campaigns</a></p>
 </article>
 HTML
     return $self->_html_response($campaign->{title} || 'Donation campaign', $body);
@@ -16233,13 +16252,16 @@ sub _donation_status_page {
         ? 'Thanks. Your donation is being confirmed by Stripe.'
         : 'Donation checkout was canceled. You can return to the campaign when ready.';
     my $safe_campaign = escape_html($campaign->{title} || 'campaign');
+    my $safe_slug = escape_html($campaign->{slug} || '');
     my $safe_message = escape_html($message);
     my $body = <<"HTML";
 <article class="content module-page donations-page donation-status">
-  <p class="kicker">Donations / Fundraising</p>
-  <h1>$title</h1>
-  <p>$safe_message</p>
-  <p><a href="/donate/$campaign->{slug}/">Return to $safe_campaign</a></p>
+  <section class="donation-status-card">
+    <p class="kicker">Donations / Fundraising</p>
+    <h1>$title</h1>
+    <p>$safe_message</p>
+    <a class="donation-return-link" href="/donate/$safe_slug/">Return to $safe_campaign</a>
+  </section>
 </article>
 HTML
     return $self->_html_response($title, $body);
@@ -16270,15 +16292,24 @@ sub _donation_campaign_card {
     my $title = escape_html($campaign->{title} || 'Campaign');
     my $summary = escape_html($campaign->{summary} || '');
     my $raised = escape_html(DesertCMS::Donations::price_label($campaign->{raised_cents}, $campaign->{currency}));
-    my $goal = int($campaign->{goal_amount_cents} || 0) > 0
-        ? ' of ' . escape_html(DesertCMS::Donations::price_label($campaign->{goal_amount_cents}, $campaign->{currency}))
+    my $goal = int($campaign->{goal_amount_cents} || 0);
+    my $goal_label = $goal > 0 && $campaign->{show_goal}
+        ? ' of ' . escape_html(DesertCMS::Donations::price_label($goal, $campaign->{currency}))
+        : '';
+    my $pct = $goal > 0 && $campaign->{show_goal} ? DesertCMS::Donations::progress_percent($campaign) : 0;
+    my $meter = $goal > 0 && $campaign->{show_goal}
+        ? qq{<div class="donation-meter" aria-hidden="true"><span style="width: $pct%"></span></div>}
         : '';
     return <<"HTML";
-<a class="event-card donation-card" href="/donate/$slug/">
-  <span class="event-card-type">Campaign</span>
+<a class="donation-card" href="/donate/$slug/">
+  <span class="donation-card-kicker">Campaign</span>
   <h2>$title</h2>
   <p>$summary</p>
-  <small>$raised raised$goal</small>
+  <div class="donation-card-progress">
+    <strong>$raised raised$goal_label</strong>
+    $meter
+  </div>
+  <span class="donation-card-action">Donate to this campaign</span>
 </a>
 HTML
 }
@@ -16287,17 +16318,32 @@ sub _donation_progress_html {
     my ($self, $campaign) = @_;
     my $raised = escape_html(DesertCMS::Donations::price_label($campaign->{raised_cents}, $campaign->{currency}));
     my $goal = int($campaign->{goal_amount_cents} || 0);
-    my $goal_label = $goal > 0 ? escape_html(DesertCMS::Donations::price_label($goal, $campaign->{currency})) : '';
+    my $show_goal = $goal > 0 && $campaign->{show_goal} ? 1 : 0;
+    my $goal_label = $show_goal ? escape_html(DesertCMS::Donations::price_label($goal, $campaign->{currency})) : '';
     my $pct = DesertCMS::Donations::progress_percent($campaign);
-    my $goal_text = $goal > 0 ? "<dd>$raised raised of $goal_label</dd>" : "<dd>$raised raised</dd>";
-    my $bar = $goal > 0 ? qq{<div class="usage-meter"><i><b style="width: $pct%"></b></i></div>} : '';
-    return qq{<dl class="event-meta donation-progress"><div><dt>Progress</dt>$goal_text</div></dl>$bar};
+    my $count = int($campaign->{paid_donation_count} || 0);
+    my $donation_count = $count == 1 ? '1 donation recorded' : "$count donations recorded";
+    my $goal_text = $show_goal ? "of $goal_label goal" : 'raised so far';
+    my $meter = $show_goal
+        ? qq{<div class="donation-meter" role="progressbar" aria-label="Donation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="$pct"><span style="width: $pct%"></span></div><small>$pct% funded</small>}
+        : '';
+    return <<"HTML";
+<section class="donation-progress-panel" aria-label="Campaign progress">
+  <div>
+    <span>Raised</span>
+    <strong>$raised</strong>
+    <small>$goal_text</small>
+  </div>
+  $meter
+  <p>$donation_count</p>
+</section>
+HTML
 }
 
 sub _donation_form_html {
     my ($self, $campaign) = @_;
     my $readiness = $self->{donations}->payment_readiness;
-    return '<section class="event-action-panel"><h2>Donate</h2><p class="events-empty">Online donations are not available on this plan or payment setup.</p><p class="muted">'
+    return '<section class="donation-panel donation-panel--unavailable"><p class="donation-panel-kicker">Online giving</p><h2>Online donations are not available</h2><p>'
         . escape_html($readiness->{summary})
         . '</p></section>' unless $readiness->{checkout_enabled};
     my $slug = escape_html($campaign->{slug} || '');
@@ -16308,28 +16354,45 @@ sub _donation_form_html {
         my $label = escape_html(DesertCMS::Donations::price_label($amount, $campaign->{currency}));
         my $checked = $first ? 'checked' : '';
         $first = 0;
-        $amount_options .= qq{<label class="checkbox-field"><input type="radio" name="amount" value="$value" $checked><span>$label</span></label>};
+        $amount_options .= qq{<label class="donation-amount-option"><input type="radio" name="amount" value="$value" $checked><span>$label</span></label>};
     }
     if ($campaign->{allow_custom_amount}) {
-        $amount_options .= qq{<label><span>Custom amount</span><input name="custom_amount" inputmode="decimal" placeholder="25.00"></label>};
+        $amount_options .= qq{<label class="donation-custom-amount"><span>Custom amount</span><input name="custom_amount" inputmode="decimal" placeholder="25.00"></label>};
     }
-    $amount_options ||= qq{<label><span>Amount</span><input name="custom_amount" inputmode="decimal" placeholder="25.00" required></label>};
+    $amount_options ||= qq{<label class="donation-custom-amount"><span>Amount</span><input name="custom_amount" inputmode="decimal" placeholder="25.00" required></label>};
     my $message_field = $campaign->{donor_message_enabled}
         ? '<label class="public-field public-field--full"><span>Message optional</span><textarea name="donor_message" rows="3"></textarea></label>'
         : '';
     return <<"HTML";
-<section class="event-action-panel donation-panel">
-  <h2>Donate</h2>
+<section class="donation-panel">
+  <p class="donation-panel-kicker">Donate online</p>
+  <h2>Choose an amount</h2>
+  <p class="donation-panel-intro">Use secure Stripe checkout for this campaign. You can review the donation before payment.</p>
   <form method="post" action="/donate/$slug/checkout" class="public-form donation-form">
-    <div class="public-field public-field--full">$amount_options</div>
-    <label><span>Name optional</span><input name="donor_name" maxlength="160"></label>
-    <label><span>Email optional</span><input name="donor_email" type="email" maxlength="180"></label>
+    <fieldset class="donation-amounts">
+      <legend>Donation amount</legend>
+      <div class="donation-amount-grid">$amount_options</div>
+    </fieldset>
+    <div class="donation-donor-grid">
+      <label><span>Name optional</span><input name="donor_name" maxlength="160"></label>
+      <label><span>Email optional</span><input name="donor_email" type="email" maxlength="180"></label>
+    </div>
     $message_field
     <label class="checkbox-field public-field--full"><input type="checkbox" name="anonymous" value="1"><span>Show my donation as anonymous</span></label>
-    <button type="submit">Donate with Stripe</button>
+    <button type="submit">Donate securely with Stripe</button>
+    <p class="donation-secure-note">Your payment is processed by Stripe; DesertCMS records the campaign, amount, and receipt status.</p>
   </form>
 </section>
 HTML
+}
+
+sub _donation_body_html {
+    my ($text) = @_;
+    my $safe = escape_html($text || '');
+    $safe =~ s{\r\n?}{\n}g;
+    $safe =~ s{\n\n+}{</p><p>}g;
+    $safe =~ s{\n}{<br>}g;
+    return length $safe ? "<p>$safe</p>" : '<p>Donation details will appear here.</p>';
 }
 
 sub _module_donations_settings_page {

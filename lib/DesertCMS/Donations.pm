@@ -188,7 +188,9 @@ sub save_campaign {
     my $id = int($args{id} || 0);
     my $title = _text($args{title}, 180);
     die "donation campaign title is required" unless length $title;
-    my $slug = _unique_campaign_slug($self->{db}->dbh, _slug($args{slug}) || slugify($title), $id);
+    my $raw_slug = _text($args{slug}, 160);
+    my $requested_slug = length $raw_slug ? _slug($raw_slug) : '';
+    my $slug = _unique_campaign_slug($self->{db}->dbh, length $requested_slug ? $requested_slug : slugify($title), $id);
     my $status = _campaign_status($args{status});
     my $currency = _currency($args{currency});
     my $goal = _price_cents($args{goal_amount} || $args{goal_amount_cents});

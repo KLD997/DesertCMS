@@ -83,6 +83,8 @@ like($polished_css, qr/DesertCMS component upgrade: public site polish/, 'legacy
 like($polished_css, qr/\.shop-shell\b/, 'legacy public CSS gains shop shell rules');
 like($polished_css, qr/\.contributor-card-media\b/, 'legacy public CSS gains contributor placeholder media rules');
 like($polished_css, qr/\.site-footer-nav a\b/, 'legacy public CSS gains footer tap target rules');
+like($polished_css, qr/DesertCMS component upgrade: public donations/, 'legacy public CSS gains public donations layout rules');
+like($polished_css, qr/\.donation-amount-grid\b/, 'legacy public CSS gains styled donation amount choices');
 like($polished_css, qr/DesertCMS component upgrade: public long text wrapping/, 'legacy public CSS gains long text wrapping marker');
 like($polished_css, qr/\.rich-text p\b[^}]*overflow-wrap:\s*anywhere/s, 'legacy public CSS wraps long rich-text strings');
 
