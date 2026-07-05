@@ -624,7 +624,7 @@ like($master_html, qr/Commerce \/ Stripe/, 'master control page shows commerce r
 like($master_html, qr/Email \/ Postmark/, 'master control page shows detailed Postmark readiness panel');
 like($master_html, qr/Payments \/ Stripe/, 'master control page shows detailed Stripe readiness panel');
 like($master_html, qr/href="\/admin\/settings\/contributors">Email setup<\/a>/, 'master control links to Postmark setup');
-like($master_html, qr/href="\/admin\/settings\/modules\/shop">Stripe settings<\/a>/, 'master control links to Stripe settings');
+like($master_html, qr/href="\/admin\/settings\/payments">Payment settings<\/a>/, 'master control links to centralized payment settings');
 like($master_html, qr/href="\/admin\/settings\/plans">Service plans<\/a>/, 'master control links to service plan billing setup');
 like($master_html, qr/Postmark webhook endpoint/, 'master control shows Postmark webhook endpoint guidance');
 like($master_html, qr/Checkout webhook endpoint.*\/stripe\/webhook/s, 'master control shows Stripe checkout webhook endpoint');
@@ -643,6 +643,59 @@ like($master_html, qr/Last login/, 'master control page shows last login field')
 like($master_html, qr/action="\/admin\/settings\/master-control\/repair-paths"/, 'master control page offers path repair');
 like($master_html, qr/action="\/admin\/settings\/master-control\/create-missing-backups"/, 'master control page offers missing backup creation');
 like($master_html, qr/href="\/admin\/settings\/master-control\/provisioning\/[0-9]+"/, 'master control links to provisioning job details');
+my $payments_html = _capture_response(sub {
+    $app->_settings_payments_page(_request(), { username => 'admin', role => 'owner' }, 'payments-session');
+});
+like($payments_html, qr/Payments &amp; Stripe/, 'central payments settings page renders');
+like($payments_html, qr/action="\/admin\/settings\/payments\/save"/, 'central payments settings page owns the provider save form');
+like($payments_html, qr/name="stripe_secret_key"/, 'central payments settings page exposes Stripe secret key field');
+like($payments_html, qr/name="stripe_webhook_secret"/, 'central payments settings page exposes Stripe webhook secret field');
+like($payments_html, qr/name="stripe_api_base"/, 'central payments settings page exposes Stripe API endpoint field');
+like($payments_html, qr/name="commerce_model"/, 'central payments settings page exposes global commerce model');
+like($payments_html, qr/Shop \/ Catalog.*Events.*Bookings \/ Appointments.*Membership \/ Gated Content.*Donations \/ Fundraising.*Hosted Service Billing/s, 'central payments settings page audits all payment-capable surfaces');
+like($payments_html, qr/\/stripe\/webhook.*\/events\/stripe\/webhook.*\/bookings\/stripe\/webhook.*\/donate\/stripe\/webhook.*\/billing\/stripe\/webhook/s, 'central payments settings page lists concrete Stripe webhook URLs');
+like($payments_html, qr/Membership Payments expansion/, 'central payments settings page labels Membership payment state accurately');
+my $payments_save_html = _capture_response(sub {
+    $app->_settings_payments_save(
+        _request(
+            commerce_model => 'master_owned',
+            stripe_secret_key => 'sk_test_central',
+            stripe_webhook_secret => 'whsec_central',
+            stripe_webhook_tolerance_seconds => 600,
+            stripe_api_base => 'https://api.stripe.com/v1/checkout/sessions',
+        ),
+        { username => 'admin', role => 'owner', user_id => 1 },
+        'payments-session'
+    );
+});
+like($payments_save_html, qr/Payment settings saved and public site rebuilt\./, 'central payments settings save succeeds');
+my $saved_payment_settings = DesertCMS::Settings::all($config, $db);
+is($saved_payment_settings->{commerce_model}, 'master_owned', 'central payments settings save stores commerce model');
+is($saved_payment_settings->{stripe_secret_key}, 'sk_test_central', 'central payments settings save stores Stripe secret key');
+is($saved_payment_settings->{stripe_webhook_secret}, 'whsec_central', 'central payments settings save stores Stripe webhook secret');
+is($saved_payment_settings->{stripe_webhook_tolerance_seconds}, 600, 'central payments settings save stores webhook tolerance');
+my $payments_preserve_html = _capture_response(sub {
+    $app->_settings_payments_save(
+        _request(
+            commerce_model => 'disabled',
+            stripe_webhook_tolerance_seconds => 300,
+            stripe_api_base => 'https://api.stripe.com/v1/checkout/sessions',
+        ),
+        { username => 'admin', role => 'owner', user_id => 1 },
+        'payments-session'
+    );
+});
+like($payments_preserve_html, qr/Payment settings saved and public site rebuilt\./, 'central payments settings save preserves blank secrets');
+my $preserved_payment_settings = DesertCMS::Settings::all($config, $db);
+is($preserved_payment_settings->{stripe_secret_key}, 'sk_test_central', 'blank central save preserves existing Stripe secret key');
+is($preserved_payment_settings->{stripe_webhook_secret}, 'whsec_central', 'blank central save preserves existing Stripe webhook secret');
+DesertCMS::Settings::set_many($config, $db, {
+    commerce_model => 'disabled',
+    stripe_secret_key => 'sk_test_platform',
+    stripe_webhook_secret => 'whsec_platform',
+    stripe_webhook_tolerance_seconds => 300,
+    stripe_api_base => 'https://api.stripe.com/v1/checkout/sessions',
+});
 my $sites_html = _capture_response(sub {
     $app->_settings_sites_page(_request(), { username => 'admin' }, 'sites-session');
 });

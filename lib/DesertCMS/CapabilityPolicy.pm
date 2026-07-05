@@ -245,6 +245,10 @@ sub _route_capability {
         $path,
         qr{\A/admin/settings/master-control(?:/|\z)}
     );
+    return _read_or_write($method, 'view_master_control', 'manage_provider_settings') if _matches(
+        $path,
+        qr{\A/admin/settings/payments(?:/|\z)}
+    );
     return 'review_contributors' if _matches(
         $path,
         qr{\A/admin/settings/contributors/requests/[0-9]+(?:/(?:approve|deny))?\z}

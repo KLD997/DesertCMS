@@ -233,6 +233,8 @@ sub _build_downloads {
         },
     );
 
+    _remove_old_download_artifacts($downloads_dir, [ map { $_->{filename} } @artifacts ]);
+
     for my $artifact (@artifacts) {
         my $path = File::Spec->catfile($downloads_dir, $artifact->{filename});
         unlink $path if -f $path;
@@ -253,6 +255,25 @@ sub _build_downloads {
     }
 
     return \@artifacts;
+}
+
+sub _remove_old_download_artifacts {
+    my ($downloads_dir, $current) = @_;
+    my %keep;
+    for my $filename (@{$current || []}) {
+        next unless defined $filename && length $filename;
+        $keep{$filename} = 1;
+        $keep{"$filename.sha256"} = 1;
+    }
+    opendir my $dh, $downloads_dir or die "cannot read downloads directory $downloads_dir: $!\n";
+    while (defined(my $entry = readdir $dh)) {
+        next if $entry eq '.' || $entry eq '..';
+        next if $keep{$entry};
+        next unless $entry =~ /\Adesertcms-(?:source|openbsd-runtime)-[0-9A-Za-z._-]+\.tar\.gz(?:\.sha256)?\z/;
+        my $path = File::Spec->catfile($downloads_dir, $entry);
+        unlink $path or die "cannot remove old download artifact $path: $!\n" if -f $path;
+    }
+    closedir $dh;
 }
 
 sub _write_release_archive {

@@ -343,6 +343,10 @@ like($shop_admin_html, qr{module-section-nav" aria-label="Shop / Catalog setup s
 like($shop_admin_html, qr{<h2>Listings</h2>}, 'shop admin uses listings heading');
 like($shop_admin_html, qr{name="listing_kind"}, 'shop admin exposes listing type field');
 like($shop_admin_html, qr{name="cta_label"}, 'shop admin exposes inquiry CTA label field');
+like($shop_admin_html, qr{href="/admin/settings/payments">Settings &gt; Payments</a>}, 'shop admin points provider settings to centralized payments page');
+unlike($shop_admin_html, qr{name="stripe_secret_key"}, 'shop admin no longer owns the Stripe secret key field');
+unlike($shop_admin_html, qr{name="stripe_webhook_secret"}, 'shop admin no longer owns the Stripe webhook secret field');
+unlike($shop_admin_html, qr{name="commerce_model"}, 'shop admin no longer owns the global commerce model field');
 like($shop_admin_html, qr{data-shop-item-card}, 'shop admin uses item card selector');
 like($shop_admin_html, qr{Publish product, service, digital, portfolio, media, and inquiry listings}, 'shop admin explains catalog listings');
 like($shop_admin_html, qr{<table class="content-table compact-table admin-card-table">.*<th>Created</th><th>Item</th><th>Rights</th><th>Total</th><th>Status</th><th>Email</th>}s, 'shop order history uses responsive admin card table markup');

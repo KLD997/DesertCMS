@@ -108,8 +108,20 @@ ok(
     'support can view Master Control'
 );
 ok(
+    DesertCMS::Governance::allowed($config, 'support', 'GET', '/admin/settings/payments'),
+    'support can view centralized payment settings'
+);
+ok(
     !DesertCMS::Governance::allowed($config, 'support', 'POST', '/admin/settings/master-control/repair-paths'),
     'support cannot run Master Control actions'
+);
+ok(
+    !DesertCMS::Governance::allowed($config, 'support', 'POST', '/admin/settings/payments/save'),
+    'support cannot change centralized payment settings'
+);
+ok(
+    DesertCMS::Governance::allowed($config, 'operator', 'POST', '/admin/settings/payments/save'),
+    'operator can change provider payment settings'
 );
 ok(
     DesertCMS::Governance::allowed($config, 'reviewer', 'POST', '/admin/settings/federation/review'),
@@ -229,6 +241,8 @@ is(DesertCMS::CapabilityPolicy::route_capability('GET', '/admin/billing'), 'view
 is(DesertCMS::CapabilityPolicy::route_capability('POST', '/admin/billing/checkout'), 'manage_billing', 'billing checkout route maps to manage_billing');
 is(DesertCMS::CapabilityPolicy::route_capability('GET', '/admin/help'), 'view_home', 'help route maps to home capability');
 is(DesertCMS::CapabilityPolicy::route_capability('POST', '/admin/settings/save'), 'manage_provider_settings', 'provider settings save route maps to manage_provider_settings');
+is(DesertCMS::CapabilityPolicy::route_capability('GET', '/admin/settings/payments'), 'view_master_control', 'payment settings read route maps to master-control visibility');
+is(DesertCMS::CapabilityPolicy::route_capability('POST', '/admin/settings/payments/save'), 'manage_provider_settings', 'payment settings save route maps to provider settings capability');
 is(DesertCMS::CapabilityPolicy::route_capability('POST', '/admin/settings/operations/backup-all'), 'run_operations', 'operations action route maps to run_operations');
 
 ok(DesertCMS::CapabilityPolicy::has($contrib_config, 'owner', 'enable_allowed_modules'), 'site manager can enable allowed features');
@@ -253,6 +267,10 @@ ok(
 ok(
     !DesertCMS::Governance::allowed($contrib_config, 'owner', 'GET', '/admin/settings/contributors'),
     'contributor subCMS owner cannot access master contributor settings'
+);
+ok(
+    !DesertCMS::Governance::allowed($contrib_config, 'owner', 'GET', '/admin/settings/payments'),
+    'contributor subCMS owner cannot access platform payment settings'
 );
 ok(
     !DesertCMS::Governance::allowed($contrib_config, 'owner', 'GET', '/admin/settings/plans'),

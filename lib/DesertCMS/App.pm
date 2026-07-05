@@ -488,6 +488,12 @@ sub _dispatch {
     if ($path eq '/admin/settings/master-control') {
         return $self->_require_login($request, sub { $self->_settings_master_control_page($request, @_) });
     }
+    if ($path eq '/admin/settings/payments') {
+        return $self->_require_login($request, sub { $self->_settings_payments_page($request, @_) });
+    }
+    if ($path eq '/admin/settings/payments/save') {
+        return $self->_require_post($request, sub { $self->_settings_payments_save($request, @_) });
+    }
     if ($path eq '/admin/settings/master-control/repair-paths') {
         return $self->_require_post($request, sub { $self->_settings_master_control_repair_paths($request, @_) });
     }
@@ -7357,9 +7363,6 @@ sub _shop_admin {
     my $payments_locked = $payments_feature && $payments_feature->{locked_by_plan} ? 1 : 0;
     my $checkout_allowed = DesertCMS::Commerce::checkout_allowed_by_plan($shop_settings);
     my $checkout_ready = $self->{shop}->checkout_ready;
-    my $commerce_model_options = $is_contributor_product
-        ? '<input type="hidden" name="commerce_model" value="' . escape_html($commerce->{model}) . '"><p class="muted">' . ($payments_locked ? 'Catalog listings stay available on this plan. Upgrade to unlock Stripe checkout and payout account setup.' : 'Site payments use the platform Stripe account. Use Billing to connect your payout account when the current plan includes site payments.') . '</p>'
-        : _commerce_model_options($commerce->{model});
     my $commerce_rows = _commerce_readiness_rows($commerce);
     my $shop_url = escape_html($self->{shop}->shop_url('/'));
     my $stripe_state = $shop_settings->{stripe_secret_key}
@@ -7380,29 +7383,14 @@ sub _shop_admin {
             ? '<span class="status-pill warn">Catalog paused</span>'
             : '<span class="status-pill status-pill--neutral">Disabled</span>');
     my $purchase_token_checked = _setting_truthy($shop_settings->{shop_require_purchase_token}) ? 'checked' : '';
-    my $stripe_tolerance = escape_html($shop_settings->{stripe_webhook_tolerance_seconds} || 300);
     my $webhook_endpoint = escape_html($self->{shop}->shop_url('/stripe/webhook'));
-    my $stripe_provider_fields = '';
-    if ($payments_locked) {
-        $stripe_provider_fields = '<p class="notice">Shop Payments is locked on this plan. Catalog listings can stay published, but buy buttons, Stripe checkout, marketplace payouts, and platform fees are hidden until the site upgrades.</p>';
-    } elsif ($is_contributor_product) {
-        $stripe_provider_fields = '<p class="muted">Stripe API keys and webhook secrets are inherited from the platform for marketplace checkout.</p>';
+    my $payment_settings_note = '';
+    if ($is_contributor_product) {
+        $payment_settings_note = '<p class="muted">' . ($payments_locked ? 'Catalog listings stay available on this plan. Upgrade to unlock Stripe checkout and payout account setup.' : 'Site payments use the platform Stripe account. Use Billing to connect your payout account when the current plan includes site payments.') . '</p>';
     } else {
-        $stripe_provider_fields = <<"HTML";
-        <div class="field-row">
-          <label>
-            <span>Stripe secret key</span>
-            <input name="stripe_secret_key" type="password" autocomplete="new-password" placeholder="Leave blank to keep saved key">
-          </label>
-          <label>
-            <span>Stripe webhook secret</span>
-            <input name="stripe_webhook_secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep saved secret">
-          </label>
-        </div>
-        <label>
-          <span>Webhook tolerance seconds</span>
-          <input name="stripe_webhook_tolerance_seconds" value="$stripe_tolerance" inputmode="numeric">
-        </label>
+        $payment_settings_note = <<"HTML";
+        <p class="muted">Stripe credentials, webhook signing, API endpoint, and the global commerce model are managed from <a href="/admin/settings/payments">Settings &gt; Payments</a>. Shop / Catalog uses those shared provider settings.</p>
+        <a class="button-link secondary" href="/admin/settings/payments">Open payment settings</a>
 HTML
     }
     my $cards = '';
@@ -7595,9 +7583,7 @@ HTML
       <input type="hidden" name="csrf_token" value="$csrf">
       <section class="inspector-panel">
         <h2>Payments</h2>
-        <div class="commerce-model-grid">
-          $commerce_model_options
-        </div>
+        $payment_settings_note
         <dl class="health-list health-list--compact fleet-provider-list">
           $commerce_rows
         </dl>
@@ -7615,7 +7601,6 @@ HTML
           <input type="checkbox" name="shop_require_purchase_token" value="1" $purchase_token_checked>
           <span>Require signed purchase tokens</span>
         </label>
-        $stripe_provider_fields
       </section>
       <button type="submit">Save shop settings</button>
     </form>
@@ -7662,34 +7647,19 @@ sub _shop_settings_save {
     my $commerce_model = 'disabled';
     my $ok = eval {
         my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+        $commerce_model = $settings->{commerce_model} || 'disabled';
         my $enabled = _module_toggle_value(
             $self->_module_feature_state($settings, 'shop'),
             $request,
             'shop_enabled'
         );
-        my $tolerance = _clean_webhook_tolerance($request->param('stripe_webhook_tolerance_seconds'));
-        my $is_contributor_product = DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config});
-        my $payments_allowed = DesertCMS::Commerce::checkout_allowed_by_plan($settings);
-        $commerce_model = $is_contributor_product
-            ? ($payments_allowed && _setting_truthy($settings->{contributor_allow_stripe_connect}) ? 'platform_marketplace' : 'disabled')
-            : (DesertCMS::Commerce::normalize_model($request->param('commerce_model')) || 'disabled');
         my %values = (
             module_shop_enabled => $enabled,
             shop_enabled => $enabled,
             shop_domain => '',
             shop_url => '',
-            commerce_model => $commerce_model,
             shop_require_purchase_token => $request->param('shop_require_purchase_token') ? 1 : 0,
         );
-        $values{stripe_webhook_tolerance_seconds} = $tolerance unless $is_contributor_product;
-
-        if (!$is_contributor_product) {
-            my $stripe_key = _clean_stripe_secret($request->param('stripe_secret_key'), 'sk');
-            my $webhook_secret = _clean_stripe_secret($request->param('stripe_webhook_secret'), 'whsec');
-            $values{stripe_secret_key} = $stripe_key if length $stripe_key;
-            $values{stripe_webhook_secret} = $webhook_secret if length $webhook_secret;
-        }
-
         DesertCMS::Settings::set_many($self->{config}, $self->{db}, \%values);
         $self->{shop}->clear_settings_cache;
         $self->{directory}->clear_settings_cache;
@@ -7702,7 +7672,7 @@ sub _shop_settings_save {
             action       => 'settings.shop_saved',
             subject_type => 'settings',
             details      => {
-                stripe_settings_touched => 1,
+                stripe_settings_touched => 0,
                 commerce_model          => $commerce_model,
                 rebuilt                 => 1,
             },
@@ -7716,7 +7686,7 @@ sub _shop_settings_save {
             ? 'Shop / Catalog settings saved.'
             : _admin_action_error(
                 'The Shop / Catalog settings could not be saved.',
-                'Check the commerce model, Stripe credentials, and webhook settings, then try again.',
+                'Check the catalog toggle and purchase-token setting, then try again.',
                 $@
             )
     );
@@ -11071,6 +11041,7 @@ sub _settings_nav {
     my @links = (
         [ overview     => '/admin/settings',                'Overview',           'view_settings' ],
         [ control      => '/admin/settings/master-control', 'Master Control',     'view_master_control' ],
+        [ payments     => '/admin/settings/payments',       'Payments',           'view_master_control' ],
         [ account      => '/admin/settings/account',        'Admin Account',      'manage_account' ],
     );
     push @links, [ contributors => $contributor_href, 'Contributor', '' ] if length $contributor_href;
@@ -11496,6 +11467,7 @@ sub _settings_page {
         $session,
         { href => '/admin/settings/account',        eyebrow => 'Access',        title => 'Admin Account',       body => 'Update your login, manage scoped admin access, and review federated contributor content.', detail => "$pending_federated pending review item(s)", capability => 'manage_account' },
         { href => '/admin/settings/master-control', eyebrow => 'Control Plane', title => 'Master Control',      body => 'Review the contributor subCMS fleet, provider readiness, queue state, paths, backups, DNS, and TLS.', detail => "$site_count sites, $queue_open queued", capability => 'view_master_control' },
+        { href => '/admin/settings/payments',       eyebrow => 'Providers',     title => 'Payments & Stripe',   body => 'Centralize Stripe credentials, webhook signing, checkout mode, service billing, and payment-module readiness.', detail => 'Shop, Events, Bookings, Membership, Donations', capability => 'view_master_control' },
         { href => ($contributor_href || '/admin/settings/contributors'), eyebrow => 'Contributor', title => 'Contributor Program', body => 'Review requests, manage blueprints, service plans, and contributor sites from one grouped surface.', detail => "$pending_invites invites, $plan_count plan(s), $site_count site(s)", capability => 'view_settings' },
         { href => '/admin/settings/upgrade',        eyebrow => 'Release',       title => 'Upgrade DesertCMS',   body => 'Stage a new release archive and let the root worker apply it.',                            detail => $upgrade_status, capability => 'run_upgrades' },
         { href => '/admin/settings/operations',     eyebrow => 'Recovery',      title => 'Operations',          body => 'Run fleet rebuilds, backups, sitemap submission, restore tests, rollbacks, and redacted support bundles.', detail => 'Backups, health, recovery', capability => 'view_operations' },
@@ -11522,6 +11494,340 @@ sub _settings_page {
 HTML
 
     return $self->_html_response('Settings', $body, $session);
+}
+
+sub _settings_payments_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    return DesertCMS::HTTP->redirect('/admin/settings/account', { security_headers() })
+        if DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config});
+
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_settings_nav('payments', $session);
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $commerce = DesertCMS::Commerce::readiness($self->{config}, $settings);
+    my $billing = $self->{service_plans}->billing_readiness($settings);
+    my $stripe_key_saved = length($settings->{stripe_secret_key} || '') ? 1 : 0;
+    my $webhook_saved = length($settings->{stripe_webhook_secret} || '') ? 1 : 0;
+    my $stripe_ready = $stripe_key_saved && $webhook_saved ? 1 : 0;
+    my $billing_ready = $billing->{ready} ? 1 : 0;
+    my $priced_plans = int($billing->{priced_plans} || 0);
+    my $priced_with_stripe = int($billing->{priced_with_stripe} || 0);
+    my $payment_module_count = 0;
+    for my $key (qw(shop events bookings membership donations)) {
+        my $feature = $self->_module_feature_state($settings, $key);
+        $payment_module_count++ if $feature && $feature->{enabled};
+    }
+    my $provider_status = _fleet_state_pill($stripe_ready ? 'ok' : 'warn', $stripe_ready ? 'Configured' : 'Needs setup');
+    my $commerce_status = _fleet_state_pill($commerce->{state}, $commerce->{label});
+    my $billing_status = _fleet_state_pill($billing_ready ? 'ok' : 'warn', $billing_ready ? 'Ready' : 'Needs setup');
+    my $module_status = '<strong>' . int($payment_module_count) . '</strong>';
+    my $settings_summary = _settings_summary_strip(
+        [ 'Stripe provider', $provider_status, $stripe_ready ? 'Secret key and webhook secret are saved.' : 'Save the Stripe secret key and webhook signing secret here.' ],
+        [ 'Commerce model', $commerce_status, $commerce->{summary} || 'Choose how checkout should be handled.' ],
+        [ 'Service billing', $billing_status, $priced_plans ? "$priced_with_stripe of $priced_plans paid plan(s) have Stripe Price IDs." : 'No paid hosted plans are configured yet.' ],
+        [ 'Payment modules', $module_status, 'Enabled modules that can use the shared Stripe provider.' ],
+    );
+    my $commerce_model_options = _commerce_model_options($commerce->{model});
+    my $commerce_rows = _commerce_readiness_rows($commerce);
+    my $module_rows = $self->_payment_module_rows($settings, $commerce, $billing);
+    my $endpoint_rows = $self->_payment_endpoint_rows;
+    my $stripe_key_state = $stripe_key_saved
+        ? '<span class="status-pill ok">Saved</span>'
+        : '<span class="status-pill warn">Missing</span>';
+    my $webhook_state = $webhook_saved
+        ? '<span class="status-pill ok">Saved</span>'
+        : '<span class="status-pill warn">Missing</span>';
+    my $key_placeholder = $stripe_key_saved
+        ? 'Saved. Leave blank to keep existing key.'
+        : 'sk_test_... or sk_live_...';
+    my $webhook_placeholder = $webhook_saved
+        ? 'Saved. Leave blank to keep existing secret.'
+        : 'whsec_...';
+    my $stripe_tolerance = escape_html($settings->{stripe_webhook_tolerance_seconds} || 300);
+    my $stripe_api_base = escape_html($settings->{stripe_api_base} || 'https://api.stripe.com/v1/checkout/sessions');
+    my $section_nav = _module_section_nav(
+        'Payment settings sections',
+        [ '#payments-provider',  'Provider' ],
+        [ '#payments-model',     'Commerce Model' ],
+        [ '#payments-modules',   'Module Usage' ],
+        [ '#payments-webhooks',  'Webhook URLs' ],
+    );
+
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Provider Settings</p>
+        <h1>Payments &amp; Stripe</h1>
+        <p>Manage the shared Stripe provider used by Shop / Catalog, Events, Bookings, Membership, Donations, and hosted service billing. Module pages inherit these settings and only keep their module-specific content, pricing, and entitlement controls.</p>
+      </div>
+    </div>
+    $notice
+    $settings_summary
+    $section_nav
+  </section>
+
+  <form method="post" action="/admin/settings/payments/save" class="settings-form settings-form--wide">
+    <input type="hidden" name="csrf_token" value="$csrf">
+    <section class="panel" id="payments-provider">
+      <h2>Stripe Provider</h2>
+      <dl class="health-list health-list--compact fleet-provider-list">
+        <div><dt>Secret key</dt><dd>$stripe_key_state<small>Stored server-side and never rendered back into the form.</small></dd></div>
+        <div><dt>Webhook secret</dt><dd>$webhook_state<small>Used to verify Stripe-signed webhook events.</small></dd></div>
+        <div><dt>API endpoint</dt><dd><code>$stripe_api_base</code><small>Checkout Session creation endpoint used by payment modules.</small></dd></div>
+      </dl>
+      <div class="field-row">
+        <label>
+          <span>Stripe secret key</span>
+          <input name="stripe_secret_key" type="password" autocomplete="new-password" placeholder="$key_placeholder">
+        </label>
+        <label>
+          <span>Stripe webhook secret</span>
+          <input name="stripe_webhook_secret" type="password" autocomplete="new-password" placeholder="$webhook_placeholder">
+        </label>
+      </div>
+      <div class="field-row">
+        <label>
+          <span>Webhook tolerance seconds</span>
+          <input name="stripe_webhook_tolerance_seconds" value="$stripe_tolerance" inputmode="numeric">
+        </label>
+        <label>
+          <span>Stripe Checkout API endpoint</span>
+          <input name="stripe_api_base" value="$stripe_api_base" inputmode="url">
+        </label>
+      </div>
+      <div class="checkbox-grid">
+        <label class="checkbox-field"><input type="checkbox" name="clear_stripe_secret_key" value="1"><span>Clear saved secret key<small>Use only when rotating away from this Stripe account.</small></span></label>
+        <label class="checkbox-field"><input type="checkbox" name="clear_stripe_webhook_secret" value="1"><span>Clear saved webhook secret<small>Use only after disabling or replacing Stripe webhooks.</small></span></label>
+      </div>
+    </section>
+
+    <section class="panel" id="payments-model">
+      <h2>Commerce Model</h2>
+      <p class="muted">This global model is shared by all payment-capable modules. Contributor marketplace payout overrides still come from the contributor plan and connected account state.</p>
+      <div class="commerce-model-grid">
+        $commerce_model_options
+      </div>
+      <dl class="health-list health-list--compact fleet-provider-list">
+        $commerce_rows
+      </dl>
+    </section>
+
+    <section class="panel" id="payments-modules">
+      <h2>Payment Module Usage</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Surface</th><th>Module</th><th>Payment Entitlement</th><th>Readiness</th><th>Provider Source / Overrides</th></tr></thead>
+        <tbody>$module_rows</tbody>
+      </table>
+    </section>
+
+    <section class="panel" id="payments-webhooks">
+      <h2>Webhook And Checkout URLs</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Surface</th><th>URL</th><th>Use</th></tr></thead>
+        <tbody>$endpoint_rows</tbody>
+      </table>
+    </section>
+
+    <button type="submit">Save payment settings and rebuild</button>
+  </form>
+</section>
+HTML
+
+    return $self->_html_response('Payments & Stripe', $body, $session);
+}
+
+sub _settings_payments_save {
+    my ($self, $request, $session, $session_token) = @_;
+    my $commerce_model = 'disabled';
+    my $ok = eval {
+        my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+        $commerce_model = DesertCMS::Commerce::normalize_model($request->param('commerce_model')) || 'disabled';
+        my $stripe_key = _clean_stripe_secret($request->param('stripe_secret_key'), 'sk');
+        my $webhook_secret = _clean_stripe_secret($request->param('stripe_webhook_secret'), 'whsec');
+        my $saved_key = $request->param('clear_stripe_secret_key')
+            ? ''
+            : (length($stripe_key) ? $stripe_key : ($settings->{stripe_secret_key} || ''));
+        my $saved_webhook = $request->param('clear_stripe_webhook_secret')
+            ? ''
+            : (length($webhook_secret) ? $webhook_secret : ($settings->{stripe_webhook_secret} || ''));
+        my %values = (
+            commerce_model => $commerce_model,
+            stripe_secret_key => $saved_key,
+            stripe_webhook_secret => $saved_webhook,
+            stripe_webhook_tolerance_seconds => _clean_webhook_tolerance($request->param('stripe_webhook_tolerance_seconds')),
+            stripe_api_base => _clean_stripe_api_base($request->param('stripe_api_base')),
+        );
+        DesertCMS::Settings::set_many($self->{config}, $self->{db}, \%values);
+        $self->_clear_payment_settings_caches;
+        $self->{content}->rebuild_all;
+        1;
+    };
+    if ($ok) {
+        $self->_audit_admin_action(
+            $session,
+            action       => 'settings.payments_saved',
+            subject_type => 'settings',
+            details      => {
+                commerce_model => $commerce_model,
+                rebuilt        => 1,
+            },
+        );
+    }
+    return $self->_settings_payments_page(
+        $request,
+        $session,
+        $session_token,
+        $ok
+            ? 'Payment settings saved and public site rebuilt.'
+            : _admin_action_error(
+                'The payment settings could not be saved.',
+                'Check the Stripe key, webhook secret, API endpoint, webhook tolerance, and commerce model, then try again.',
+                $@
+            )
+    );
+}
+
+sub _payment_module_rows {
+    my ($self, $settings, $commerce, $billing) = @_;
+    $settings ||= {};
+    $commerce ||= DesertCMS::Commerce::readiness($self->{config}, $settings);
+    $billing ||= $self->{service_plans}->billing_readiness($settings);
+    my $billing_ready = $billing->{ready} ? 1 : 0;
+    my $priced = int($billing->{priced_plans} || 0);
+    my $priced_with_stripe = int($billing->{priced_with_stripe} || 0);
+    my $billing_readiness = {
+        state   => $billing_ready ? 'ok' : 'warn',
+        label   => $billing_ready ? 'Ready' : 'Needs setup',
+        summary => $priced
+            ? "$priced_with_stripe of $priced paid plan(s) have Stripe Price IDs."
+            : ($billing->{stripe_ready} ? 'Stripe is ready; no paid hosted plans are configured.' : 'Save Stripe credentials before hosted service billing can run.'),
+    };
+    my @defs = (
+        {
+            label => 'Shop / Catalog',
+            href => '/admin/settings/modules/shop',
+            surface => '/shop checkout and /stripe/webhook',
+            feature => 'shop',
+            payment => 'shop_payments',
+            readiness => $commerce,
+            provider => 'Shared Stripe settings',
+            override => 'Listing prices and signed purchase tokens stay in Shop.',
+        },
+        {
+            label => 'Events',
+            href => '/admin/settings/modules/events',
+            surface => '/events checkout and /events/stripe/webhook',
+            feature => 'events',
+            payment => 'event_payments',
+            readiness => $self->{events}->payment_readiness,
+            provider => 'Shared Stripe settings',
+            override => 'Ticket/deposit pricing stays with each event.',
+        },
+        {
+            label => 'Bookings / Appointments',
+            href => '/admin/settings/modules/bookings',
+            surface => '/bookings checkout and /bookings/stripe/webhook',
+            feature => 'bookings',
+            payment => 'booking_payments',
+            readiness => $self->{bookings}->payment_readiness,
+            provider => 'Shared Stripe settings',
+            override => 'Deposit requirements and service pricing stay in Bookings.',
+        },
+        {
+            label => 'Membership / Gated Content',
+            href => '/admin/settings/modules/membership',
+            surface => '/members/payments/checkout',
+            feature => 'membership',
+            payment => 'membership_payments',
+            readiness => $self->{membership}->payment_readiness,
+            provider => 'Shared Stripe settings',
+            override => 'Checkout fulfillment remains reserved for the Membership Payments expansion.',
+        },
+        {
+            label => 'Donations / Fundraising',
+            href => '/admin/settings/modules/donations',
+            surface => '/donate checkout and /donate/stripe/webhook',
+            feature => 'donations',
+            payment => 'donation_payments',
+            readiness => $self->{donations}->payment_readiness,
+            provider => 'Shared Stripe settings',
+            override => 'Campaign goals, suggested amounts, and donor export stay in Donations.',
+        },
+        {
+            label => 'Hosted Service Billing',
+            href => '/admin/settings/plans',
+            surface => '/billing checkout and /billing/stripe/webhook',
+            feature => '',
+            payment => '',
+            readiness => $billing_readiness,
+            provider => 'Shared Stripe settings',
+            override => 'Each paid service plan still needs its own Stripe Price ID.',
+        },
+    );
+    my $html = '';
+    for my $def (@defs) {
+        my $href = escape_html($def->{href});
+        my $label = escape_html($def->{label});
+        my $surface = escape_html($def->{surface});
+        my $feature_html = $def->{feature}
+            ? _module_status_html($self->_module_feature_state($settings, $def->{feature}), $self->{config})
+            : '<span class="status-pill status-pill--neutral">Platform</span>';
+        my $payment_html = $def->{payment}
+            ? _module_status_html($self->_module_feature_state($settings, $def->{payment}), $self->{config})
+            : '<span class="status-pill status-pill--neutral">Service Plans</span>';
+        my $readiness = $def->{readiness} || {};
+        my $readiness_html = _fleet_state_pill($readiness->{state} || 'neutral', $readiness->{label} || 'Unknown')
+            . '<small>' . escape_html($readiness->{summary} || 'Readiness could not be calculated.') . '</small>';
+        my $provider = escape_html($def->{provider});
+        my $override = escape_html($def->{override});
+        $html .= <<"HTML";
+<tr>
+  <td data-label="Surface"><a href="$href"><strong>$label</strong></a><br><small>$surface</small></td>
+  <td data-label="Module">$feature_html</td>
+  <td data-label="Payment Entitlement">$payment_html</td>
+  <td data-label="Readiness">$readiness_html</td>
+  <td data-label="Provider Source / Overrides"><strong>$provider</strong><br><small>$override</small></td>
+</tr>
+HTML
+    }
+    return $html;
+}
+
+sub _payment_endpoint_rows {
+    my ($self) = @_;
+    my @defs = (
+        [ 'Shop / Catalog',             $self->_absolute_url('/stripe/webhook'),            'Stripe Checkout fulfillment for catalog orders.' ],
+        [ 'Events',                     $self->_absolute_url('/events/stripe/webhook'),     'Stripe Checkout fulfillment for event payments.' ],
+        [ 'Bookings / Appointments',    $self->_absolute_url('/bookings/stripe/webhook'),   'Stripe Checkout fulfillment for booking deposits.' ],
+        [ 'Donations / Fundraising',    $self->_absolute_url('/donate/stripe/webhook'),     'Stripe Checkout fulfillment for donations.' ],
+        [ 'Hosted Service Billing',     $self->_absolute_url('/billing/stripe/webhook'),    'Subscription and hosted contributor plan billing updates.' ],
+        [ 'Membership / Gated Content', $self->_absolute_url('/members/payments/checkout'), 'Checkout start route only; payment fulfillment is reserved for the Membership Payments expansion.' ],
+    );
+    return join '', map {
+        my ($label, $url, $use) = @{$_};
+        my $safe_label = escape_html($label);
+        my $safe_url = escape_html($url);
+        my $safe_use = escape_html($use);
+        <<"HTML";
+<tr>
+  <td data-label="Surface"><strong>$safe_label</strong></td>
+  <td data-label="URL"><code>$safe_url</code></td>
+  <td data-label="Use">$safe_use</td>
+</tr>
+HTML
+    } @defs;
+}
+
+sub _clear_payment_settings_caches {
+    my ($self) = @_;
+    for my $slot (qw(shop events bookings membership donations directory newsletter)) {
+        next unless $self->{$slot} && $self->{$slot}->can('clear_settings_cache');
+        $self->{$slot}->clear_settings_cache;
+    }
 }
 
 sub _settings_master_control_page {
@@ -12063,7 +12369,7 @@ sub _provider_readiness_detail_panels {
         <p>$commerce_summary</p>
       </div>
       <div class="provider-readiness-actions">
-        <a class="button-link secondary" href="/admin/settings/modules/shop">Stripe settings</a>
+        <a class="button-link secondary" href="/admin/settings/payments">Payment settings</a>
         <a class="button-link secondary" href="/admin/settings/plans">Service plans</a>
       </div>
     </div>
@@ -13864,7 +14170,7 @@ sub _settings_plans_page {
         : _fleet_state_pill('warn', 'Needs setup');
     my $stripe_detail = $readiness->{stripe_ready}
         ? 'Stripe key and webhook secret are saved.'
-        : 'Set Stripe key and webhook secret in Modules > Shop before taking payments.';
+        : 'Set the Stripe key and webhook secret in Settings > Payments before taking payments.';
     my $price_state = (!$readiness->{priced_plans} || $readiness->{priced_plans} == $readiness->{priced_with_stripe})
         ? _fleet_state_pill('ok', 'Mapped')
         : _fleet_state_pill('warn', 'Missing price IDs');
@@ -13892,7 +14198,7 @@ sub _settings_plans_page {
         <h1>Service Plans</h1>
         <p>Package contributor subCMS quotas, billing metadata, Stripe Price IDs, and usage oversight for a hosted DesertCMS offering.</p>
       </div>
-      <a class="button-link secondary" href="/admin/settings/modules/shop">Stripe settings</a>
+      <a class="button-link secondary" href="/admin/settings/payments">Payment settings</a>
     </div>
     $notice
     $plan_sections
@@ -20645,6 +20951,18 @@ sub _clean_webhook_tolerance {
     die "Webhook tolerance must be between 60 and 3600 seconds"
         unless $seconds >= 60 && $seconds <= 3600;
     return $seconds;
+}
+
+sub _clean_stripe_api_base {
+    my ($value) = @_;
+    $value = 'https://api.stripe.com/v1/checkout/sessions'
+        unless defined $value && "$value" =~ /\S/;
+    $value =~ s/^\s+|\s+\z//g;
+    die "Stripe API endpoint must start with https://"
+        unless $value =~ m{\Ahttps://}i;
+    die "Stripe API endpoint contains unsupported characters"
+        unless $value =~ m{\Ahttps://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~:/?#\[\]@!\$&'()*+,;=%-]*)?\z};
+    return $value;
 }
 
 sub _contributor_request_rows {
