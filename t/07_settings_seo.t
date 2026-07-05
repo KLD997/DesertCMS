@@ -199,7 +199,7 @@ like($html, qr/--site-logo-object-fit: cover;/, 'page includes logo fit token');
 like($html, qr/--site-logo-object-position: 25% 70%;/, 'page includes logo focal point token');
 like($html, qr/:root\[data-theme="light"\] \{[^}]*--paper: #edf7f8;/s, 'settings light theme applies to light mode');
 like($html, qr/:root\[data-theme="dark"\] \{[^}]*--paper: #091511;/s, 'settings dark theme applies to dark mode');
-like($html, qr/defaultTheme = 'dark'/, 'explicit dark mode becomes the default public mode');
+like($html, qr/<html[^>]*data-default-theme="dark"[^>]*data-theme="dark"/, 'explicit dark mode becomes the default public mode');
 like($html, qr/Settings Name/, 'page uses settings site name');
 
 my $app = DesertCMS::App->new;

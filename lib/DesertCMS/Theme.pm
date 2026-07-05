@@ -16,6 +16,7 @@ my @ALLOWED_FILES = qw(
     templates/posts.html
     templates/archive.html
     assets/site.css
+    assets/site.js
     assets/map.js
     assets/comments.js
 );
@@ -43,12 +44,14 @@ sub install_default {
         _ensure_docs_css($dest);
         _ensure_docs_nav_layout_css($dest);
         _ensure_comments_js($dest);
+        _ensure_site_js($dest);
         _ensure_theme_toggle_css($dest);
         _ensure_theme_toggle_template($dest);
         _ensure_theme_style_template($dest);
         _ensure_site_brand_template($dest);
         _ensure_site_layout_template($dest);
         _ensure_mobile_nav_template($dest);
+        _ensure_public_shell_script_template($dest);
         _ensure_site_layout_css($dest);
         _ensure_logo_fit_css($dest);
         _ensure_mobile_nav_css($dest);
@@ -80,12 +83,14 @@ sub install_default {
     _ensure_docs_css($dest);
     _ensure_docs_nav_layout_css($dest);
     _ensure_comments_js($dest);
+    _ensure_site_js($dest);
     _ensure_theme_toggle_css($dest);
     _ensure_theme_toggle_template($dest);
     _ensure_theme_style_template($dest);
     _ensure_site_brand_template($dest);
     _ensure_site_layout_template($dest);
     _ensure_mobile_nav_template($dest);
+    _ensure_public_shell_script_template($dest);
     _ensure_site_layout_css($dest);
     _ensure_logo_fit_css($dest);
     _ensure_mobile_nav_css($dest);
@@ -511,6 +516,15 @@ sub _ensure_comments_js {
     my $source = File::Spec->catfile(_repo_default_theme_dir(), 'assets', 'comments.js');
     return if _same_file($source, $path);
     copy($source, $path) or die "cannot update comments script $path: $!";
+}
+
+sub _ensure_site_js {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'assets', 'site.js');
+    my $source = File::Spec->catfile(_repo_default_theme_dir(), 'assets', 'site.js');
+    return if -f $path && _read_file($path) =~ /DesertCMS public shell v2/;
+    return if _same_file($source, $path);
+    copy($source, $path) or die "cannot update public shell script $path: $!";
 }
 
 sub _ensure_docs_css {
@@ -1063,6 +1077,39 @@ JS
 
     return if $body eq $original;
     open my $fh, '>', $path or die "cannot update theme mobile nav template $path: $!";
+    print {$fh} $body;
+    close $fh;
+}
+
+sub _ensure_public_shell_script_template {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'templates', 'layout.html');
+    return unless -f $path;
+    my $body = _read_file($path);
+    my $original = $body;
+
+    $body =~ s{<html\b([^>]*)>}{
+        my $attrs = $1;
+        $attrs .= ' data-default-theme="{{default_theme_mode}}"' unless $attrs =~ /\bdata-default-theme=/;
+        $attrs .= ' data-theme="{{default_theme_mode}}"' unless $attrs =~ /\bdata-theme=/;
+        $attrs .= ' data-analytics-enabled="{{analytics_enabled}}"' unless $attrs =~ /\bdata-analytics-enabled=/;
+        '<html' . $attrs . '>';
+    }se;
+
+    if ($body !~ m{<script src="/assets/site\.js"></script>}) {
+        if ($body =~ m{<link rel="stylesheet" href="/assets/site\.css">}) {
+            $body =~ s{(\s*<link rel="stylesheet" href="/assets/site\.css">)}{  <script src="/assets/site.js"></script>\n$1}s;
+        } else {
+            $body =~ s{</head>}{  <script src="/assets/site.js"></script>\n</head>}s;
+        }
+    }
+
+    $body =~ s{\s*<script>\s*document\.documentElement\.classList\.add\('has-js'\);.*?</script>\s*}{\n}s;
+    $body =~ s{\s*<script>\s*\(function \(\) \{\s*var button = document\.querySelector\('\[data-theme-toggle\]'\);.*?\}\(\)\);\s*</script>\s*}{\n}s;
+    $body =~ s{\n\{\{analytics_script\}\}\s*}{\n}s;
+
+    return if $body eq $original;
+    open my $fh, '>', $path or die "cannot update public shell script template $path: $!";
     print {$fh} $body;
     close $fh;
 }

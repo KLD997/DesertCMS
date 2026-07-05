@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-default-theme="{{default_theme_mode}}" data-theme="{{default_theme_mode}}" data-analytics-enabled="{{analytics_enabled}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,17 +7,7 @@
   <meta name="description" content="{{excerpt}}">
   <link rel="canonical" href="{{canonical_url}}">
 {{favicon_link}}{{social_meta}}
-  <script>
-  document.documentElement.classList.add('has-js');
-  try {
-    var defaultTheme = '{{default_theme_mode}}';
-    if (defaultTheme === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    } else {
-      document.documentElement.setAttribute('data-theme', 'light');
-    }
-  } catch (error) {}
-  </script>
+  <script src="/assets/site.js"></script>
   <link rel="stylesheet" href="/assets/site.css">
 {{theme_style}}
 </head>
@@ -45,147 +35,5 @@
     {{footer_navigation}}
     {{footer_credit}}
   </footer>
-  <script>
-  (function () {
-    var button = document.querySelector('[data-theme-toggle]');
-    var menuButton = document.querySelector('[data-site-menu-toggle]');
-    var menu = document.querySelector('[data-site-menu]');
-    var header = menuButton ? menuButton.closest('.site-header') : null;
-    function setTheme(theme) {
-      var next = theme === 'dark' ? 'dark' : 'light';
-      document.documentElement.setAttribute('data-theme', next);
-      if (button) {
-        button.setAttribute('data-theme-state', next);
-        button.setAttribute('aria-label', next === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
-      }
-    }
-    var stored = '{{default_theme_mode}}';
-    setTheme(stored);
-    if (button) {
-      button.addEventListener('click', function () {
-        setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-      });
-    }
-    function setMenu(open) {
-      if (!menuButton || !header) {
-        return;
-      }
-      header.classList.toggle('is-menu-open', open);
-      menuButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-      menuButton.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
-    }
-    function normalizePath(path) {
-      if (!path) {
-        return '/';
-      }
-      return path.replace(/\/index\.html$/, '/').replace(/\/+$/, '/') || '/';
-    }
-    if (menu) {
-      var current = normalizePath(window.location.pathname);
-      Array.prototype.forEach.call(menu.querySelectorAll('a[href]'), function (link) {
-        var href = link.getAttribute('href') || '';
-        if (/^https?:\/\//i.test(href)) {
-          return;
-        }
-        if (normalizePath(href.split('#')[0].split('?')[0]) === current) {
-          link.setAttribute('aria-current', 'page');
-          link.classList.add('active');
-        }
-      });
-    }
-    if (menuButton) {
-      menuButton.addEventListener('click', function () {
-        setMenu(!(header && header.classList.contains('is-menu-open')));
-      });
-      if (menu) {
-        menu.addEventListener('click', function (event) {
-          if (event.target && event.target.closest('a')) {
-            setMenu(false);
-          }
-        });
-      }
-      document.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape') {
-          setMenu(false);
-        }
-      });
-      window.addEventListener('resize', function () {
-        if (window.matchMedia('(min-width: 821px)').matches) {
-          setMenu(false);
-        }
-      });
-    }
-    function updateCounter(field) {
-      var container = field.closest ? field.closest('.public-count-field') : field.parentNode;
-      var output = container ? container.querySelector('[data-counter-output]') : null;
-      if (!output) {
-        return;
-      }
-      var count = field.value.length;
-      var min = parseInt(field.getAttribute('data-counter-min') || '0', 10);
-      var max = parseInt(field.getAttribute('data-counter-max') || field.getAttribute('maxlength') || '0', 10);
-      var text = max ? count + ' / ' + max + ' characters' : count + ' characters';
-      if (min && count > 0 && count < min) {
-        text += ' (' + (min - count) + ' more minimum)';
-      }
-      output.textContent = text;
-      if (container) {
-        container.classList.toggle('is-under-limit', !!(min && count > 0 && count < min));
-        container.classList.toggle('is-over-limit', !!(max && count > max));
-      }
-    }
-    function formatFileSize(bytes) {
-      if (!bytes && bytes !== 0) {
-        return '';
-      }
-      if (bytes >= 1048576) {
-        return (bytes / 1048576).toFixed(1).replace(/\.0$/, '') + ' MB';
-      }
-      if (bytes >= 1024) {
-        return Math.ceil(bytes / 1024) + ' KB';
-      }
-      return bytes + ' bytes';
-    }
-    function updateUploadPreview(field) {
-      var container = field.closest ? field.closest('.public-upload-field') : field.parentNode;
-      var output = container ? container.querySelector('[data-upload-preview-output]') : null;
-      if (!output) {
-        return;
-      }
-      var file = field.files && field.files[0] ? field.files[0] : null;
-      output.textContent = '';
-      var thumb = document.createElement('span');
-      thumb.className = 'public-upload-thumb';
-      thumb.setAttribute('aria-hidden', 'true');
-      var label = document.createElement('small');
-      if (!file) {
-        label.textContent = 'No file selected';
-        output.appendChild(thumb);
-        output.appendChild(label);
-        return;
-      }
-      label.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
-      output.appendChild(thumb);
-      output.appendChild(label);
-      if (/^image\//.test(file.type || '') && window.FileReader) {
-        var reader = new FileReader();
-        reader.onload = function (event) {
-          thumb.style.backgroundImage = 'url("' + event.target.result + '")';
-          thumb.classList.add('has-image');
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-    Array.prototype.forEach.call(document.querySelectorAll('[data-character-counter]'), function (field) {
-      updateCounter(field);
-      field.addEventListener('input', function () { updateCounter(field); });
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('[data-upload-preview]'), function (field) {
-      updateUploadPreview(field);
-      field.addEventListener('change', function () { updateUploadPreview(field); });
-    });
-  }());
-  </script>
-{{analytics_script}}
 </body>
 </html>

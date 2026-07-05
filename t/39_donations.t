@@ -154,6 +154,9 @@ my $public_detail = _capture_response(sub {
 });
 like($public_detail, qr{Donor notes are welcome}, 'dynamic donation detail route renders campaign body');
 like($public_detail, qr{<link rel="stylesheet" href="/assets/site\.css">}, 'dynamic donation detail route uses the public theme shell');
+like($public_detail, qr{<script src="/assets/site\.js"></script>}, 'dynamic donation detail route uses CSP-compatible public shell script');
+like($public_detail, qr{data-analytics-enabled="1"}, 'dynamic donation detail route enables analytics without inline script');
+unlike($public_detail, qr{document\.querySelector\('\[data-theme-toggle\]'\)}, 'dynamic donation detail route does not emit inline theme toggle script');
 unlike($public_detail, qr{/admin/assets/admin\.css|href="/admin"}, 'dynamic donation detail route does not expose the admin shell or admin brand link');
 like($public_detail, qr{donation-panel--unavailable}, 'dynamic donation detail route renders styled unavailable payment state');
 

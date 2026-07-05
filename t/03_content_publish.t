@@ -248,6 +248,7 @@ my $robots_path = File::Spec->catfile($root, 'public', 'robots.txt');
 my $redirect_conf_path = File::Spec->catfile($root, 'public', 'redirects.httpd.conf');
 my $redirect_stub_path = File::Spec->catfile($root, 'public', 'old-note', 'index.html');
 my $asset_path = File::Spec->catfile($root, 'public', 'assets', 'site.css');
+my $site_js_asset_path = File::Spec->catfile($root, 'public', 'assets', 'site.js');
 my $map_asset_path = File::Spec->catfile($root, 'public', 'assets', 'map.js');
 my $comments_asset_path = File::Spec->catfile($root, 'public', 'assets', 'comments.js');
 
@@ -266,6 +267,7 @@ ok(-f $robots_path, 'published robots file');
 ok(-f $redirect_conf_path, 'published httpd redirect include');
 ok(-f $redirect_stub_path, 'published static redirect fallback');
 ok(-f $asset_path, 'published theme asset');
+ok(-f $site_js_asset_path, 'published public shell script');
 ok(-f $map_asset_path, 'published map asset');
 ok(-f $comments_asset_path, 'published comments asset');
 
@@ -278,11 +280,14 @@ like($index_html, qr{href="/gallery/"}, 'checked page appears in navigation');
 like($index_html, qr{href="/map/"}, 'navigation includes map page');
 like($index_html, qr/class="[^"]*\bsite-footer\b[^"]*"/, 'renders public footer');
 like($index_html, qr/data-theme-toggle/, 'renders public theme toggle');
+like($index_html, qr{<script src="/assets/site\.js"></script>}, 'renders public shell script');
 like($index_html, qr/data-site-menu-toggle/, 'renders public mobile navigation toggle');
 like($index_html, qr/<nav id="site-primary-nav" class="[^"]*\bsite-nav\b[^"]*" data-site-menu>/, 'renders public navigation menu target');
 unlike($index_html, qr/<span class="sr-only">Toggle color theme<\/span>/, 'public theme toggle has no visible text fallback');
 unlike($index_html, qr/title="Toggle color theme"/, 'public theme toggle avoids browser tooltip text');
-like($index_html, qr{/analytics/collect}, 'injects analytics collector beacon');
+like($index_html, qr/data-analytics-enabled="1"/, 'enables analytics collector beacon without inline script');
+unlike($index_html, qr/document\.querySelector\('\[data-theme-toggle\]'\)/, 'public shell behavior is not emitted inline');
+like(_read($site_js_asset_path), qr{/analytics/collect}, 'public shell script contains analytics collector endpoint');
 
 my $child_html = _read($child_path);
 like($child_html, qr/Framed Print/, 'renders nested child page title');

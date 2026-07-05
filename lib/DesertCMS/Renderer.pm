@@ -1083,6 +1083,7 @@ sub _layout_template_vars {
         favicon_link       => _favicon_link($site, $site_images),
         theme_style        => DesertCMS::SiteTheme::style_tag($site, config => $config),
         default_theme_mode => DesertCMS::SiteTheme::default_mode($site),
+        analytics_enabled  => DesertCMS::Analytics::enabled($config) ? 1 : 0,
         analytics_script   => DesertCMS::Analytics::tracking_script($config),
     );
 }
@@ -3879,7 +3880,7 @@ sub _publish_assets {
     DesertCMS::Theme::install_default($config);
     my $site = $db ? DesertCMS::Settings::all($config, $db) : {};
     DesertCMS::FontPackages::publish_selected_fonts($config, $site);
-    for my $asset (qw(site.css map.js comments.js)) {
+    for my $asset (qw(site.css site.js map.js comments.js)) {
         my $source = File::Spec->catfile($config->get('theme_dir'), 'default', 'assets', $asset);
         my $dest = File::Spec->catfile($config->get('public_root'), 'assets', $asset);
         open my $in, '<', $source or die "cannot read theme asset $source: $!";
