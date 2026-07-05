@@ -1,0 +1,12 @@
+#!/bin/ksh
+#
+# OpenBSD rc.d script for DesertCMS admin CGI.
+
+daemon="/usr/sbin/slowcgi"
+daemon_flags="-p / -u _desertcms -s /var/www/run/desertcms.sock"
+
+. /etc/rc.d/rc.subr
+
+rc_reload=NO
+
+rc_cmd $1

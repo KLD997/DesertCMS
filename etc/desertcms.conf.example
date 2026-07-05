@@ -1,0 +1,67 @@
+# DesertCMS configuration
+
+site_name = DesertCMS
+site_url = https://example.com
+
+data_dir = /var/desertcms
+db_path = /var/desertcms/desertcms.sqlite
+app_secret_file = /var/desertcms/app_secret
+public_root = /var/www/htdocs/desertcms-site
+originals_dir = /var/desertcms/originals
+backup_dir = /var/desertcms/backups
+theme_dir = /var/desertcms/themes
+admin_asset_dir = /usr/local/www/desertcms/admin/assets
+
+session_cookie = desertcms_session
+session_ttl_seconds = 7200
+secure_cookies = 1
+trusted_proxy_cidrs =
+max_request_body_bytes = 67108864
+
+login_lockout_seconds = 900
+login_max_failures = 5
+
+image_public_max_width = 1600
+image_public_quality = 82
+image_tool = /usr/local/bin/vips
+tar_tool = tar
+
+analytics_enabled = 1
+analytics_retention_days = 365
+analytics_store_raw_ip = 1
+
+module_map_enabled = 1
+module_shop_enabled = 1
+module_gallery_enabled = 0
+module_forms_enabled = 0
+module_contributor_requests_enabled = 1
+module_docs_enabled = 0
+module_events_enabled = 0
+module_directory_enabled = 0
+module_bookings_enabled = 0
+module_membership_enabled = 0
+module_newsletter_enabled = 0
+module_donations_enabled = 0
+module_testimonials_enabled = 0
+docs_source_dir =
+shop_domain =
+shop_url =
+commerce_model = master_owned
+shop_enabled = 1
+shop_require_purchase_token = 1
+stripe_secret_key =
+stripe_webhook_secret =
+stripe_webhook_tolerance_seconds = 300
+
+# Transactional email. Configure these in Admin Settings > Contributors or here.
+postmark_sender_mode = site
+postmark_from_email =
+postmark_server_token =
+postmark_webhook_token =
+
+# Optional search-engine submission defaults. These can also be saved in Admin Settings > Site Settings.
+google_oauth_client_id =
+google_oauth_client_secret =
+google_search_console_property =
+indexnow_enabled = 0
+indexnow_key =

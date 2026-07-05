@@ -1,0 +1,15 @@
+.tools/
+data/
+dist/
+local/
+
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tar.gz
+*.log
+
+.env
+.env.*
+*.pem
+*.key

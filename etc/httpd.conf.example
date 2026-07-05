@@ -1,0 +1,210 @@
+# Merge this example into /etc/httpd.conf and replace example.com.
+
+types {
+	include "/usr/share/misc/mime.types"
+}
+
+server "example.com" {
+	listen on * tls port 443
+	root "/htdocs/desertcms-site"
+
+	connection {
+		max request body 67108864
+	}
+
+	tls {
+		certificate "/etc/ssl/example.com.fullchain.pem"
+		key "/etc/ssl/private/example.com.key"
+	}
+
+	hsts {
+		max-age 31536000
+	}
+
+	location "/admin*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/admin"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/analytics*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/analytics"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/comments*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/comments"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/ratings*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/ratings"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/forms*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/forms"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/shop*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/shop"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/stripe*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/stripe"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/billing*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/billing"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/postmark*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/postmark"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/events*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/events"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/directory*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/directory"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/bookings*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/bookings"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/members*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/members"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/newsletter*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/newsletter"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/donate*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/donate"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/testimonials*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/testimonials"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/.well-known/acme-challenge/*" {
+		root "/acme"
+		request strip 2
+	}
+}
+
+server "www.example.com" {
+	listen on * tls port 443
+	root "/htdocs/desertcms-site"
+
+	tls {
+		certificate "/etc/ssl/example.com.fullchain.pem"
+		key "/etc/ssl/private/example.com.key"
+	}
+
+	hsts {
+		max-age 31536000
+	}
+
+	location "/.well-known/acme-challenge/*" {
+		root "/acme"
+		request strip 2
+	}
+
+	location "/*" {
+		block return 301 "https://example.com$REQUEST_URI"
+	}
+}
+
+server "example.com" {
+	listen on * port 80
+	root "/htdocs/desertcms-site"
+	alias "www.example.com"
+
+	location "/.well-known/acme-challenge/*" {
+		root "/acme"
+		request strip 2
+	}
+
+	location "/*" {
+		block return 301 "https://example.com$REQUEST_URI"
+	}
+}

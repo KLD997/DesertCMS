@@ -1,0 +1,18 @@
+# DesertCMS pf example for OpenBSD.
+# Copy to /etc/pf.conf only after adjusting <ssh_admins>.
+
+ext_if = "egress"
+table <ssh_admins> persist { 203.0.113.10/32 }
+
+set block-policy drop
+set skip on lo
+
+block log all
+match in all scrub (no-df random-id max-mss 1440)
+
+pass out quick all keep state
+
+pass in quick on $ext_if proto tcp from <ssh_admins> to ($ext_if) port 22 flags S/SA keep state
+pass in quick on $ext_if proto tcp from any to ($ext_if) port { 80 443 } flags S/SA keep state
+pass in quick on $ext_if inet proto icmp icmp-type echoreq keep state
+pass in quick on $ext_if inet6 proto icmp6 keep state
