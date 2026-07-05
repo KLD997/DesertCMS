@@ -130,14 +130,15 @@ like($donate_html, qr{Archive Fund}, 'donations index renders published campaign
 like($donate_html, qr{Help preserve community materials}, 'donations index renders campaign summary');
 like($donate_html, qr{class="content module-page donations-page donations-shell"}, 'donations index uses the dedicated public donations shell');
 like($donate_html, qr{How to give.*Choose a campaign.*Select an amount.*Donate securely}s, 'donations index explains how visitors can donate');
-like($donate_html, qr{class="donation-card".*Donate to this campaign}s, 'donations index campaign card has an obvious donation action');
+like($donate_html, qr{class="donation-card".*Open campaign.*Give to this campaign}s, 'donations index campaign card has obvious campaign and donation actions');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'donate', 'archive-fund', 'index.html'));
 like($detail_html, qr{Funds support scanning}, 'donation detail renders campaign body');
-like($detail_html, qr{donation-detail-layout.*Where your donation goes.*Donation options}s, 'donation detail separates campaign story from donation options');
+like($detail_html, qr{donation-priority.*Online donations are not available.*Campaign story.*Where your donation goes}s, 'donation detail puts donation options before the campaign story');
 like($detail_html, qr{USD 0\.00.*of USD 5000\.00 goal}s, 'donation detail renders goal progress');
 like($detail_html, qr{Online donations are not available}, 'donation detail hides checkout when payments are not ready');
 unlike($detail_html, qr{Donate with Stripe}, 'donation detail omits Stripe button when checkout is unavailable');
+like(DesertCMS::Donations::campaign_body_html("What Donations Support\n\nCore improvements\nDocumentation\nOpenBSD testing"), qr{<h3>What Donations Support</h3>.*<ul class="donation-body-list">.*<li>Core improvements</li>.*<li>OpenBSD testing</li>}s, 'donation campaign body formatter upgrades plain headings and lists');
 
 my $sitemap = _read(File::Spec->catfile($root, 'public', 'sitemap.xml'));
 like($sitemap, qr{https://donations\.example\.test/donate/</loc>}, 'sitemap includes donations index');
@@ -152,6 +153,8 @@ my $public_detail = _capture_response(sub {
     $app->_dispatch_donations(_donation_request('/donate/archive-fund'));
 });
 like($public_detail, qr{Donor notes are welcome}, 'dynamic donation detail route renders campaign body');
+like($public_detail, qr{<link rel="stylesheet" href="/assets/site\.css">}, 'dynamic donation detail route uses the public theme shell');
+unlike($public_detail, qr{/admin/assets/admin\.css|href="/admin"}, 'dynamic donation detail route does not expose the admin shell or admin brand link');
 like($public_detail, qr{donation-panel--unavailable}, 'dynamic donation detail route renders styled unavailable payment state');
 
 my $admin_html = _capture_response(sub {

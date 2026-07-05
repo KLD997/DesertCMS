@@ -2819,19 +2819,29 @@ sub _write_donation_pages {
     <div class="donations-hero-copy">
       <p class="kicker">Donations / Fundraising</p>
       <h1>$safe_title</h1>
-      <p>$safe_intro</p>
+      <p class="donations-hero-intro">$safe_intro</p>
+      <div class="donations-hero-actions">
+        <a class="donation-primary-link" href="#donation-campaigns">View campaigns</a>
+        <span>Secure checkout opens from each campaign page.</span>
+      </div>
     </div>
     <aside class="donations-how-card" aria-label="How donations work">
-      <strong>How to give</strong>
-      <ol class="donations-steps">
-        <li><span>1</span><p><b>Choose a campaign</b><small>Pick the fund or project you want to support.</small></p></li>
-        <li><span>2</span><p><b>Select an amount</b><small>Use a suggested amount or enter a custom gift.</small></p></li>
-        <li><span>3</span><p><b>Donate securely</b><small>Checkout opens through the configured Stripe payment flow.</small></p></li>
-      </ol>
+      <span class="donations-card-label">How to give</span>
+      <div class="donations-steps" role="list">
+        <div role="listitem"><span>1</span><p><b>Choose a campaign</b><small>Pick the fund or project you want to support.</small></p></div>
+        <div role="listitem"><span>2</span><p><b>Select an amount</b><small>Use a suggested amount or enter a custom gift.</small></p></div>
+        <div role="listitem"><span>3</span><p><b>Donate securely</b><small>Checkout opens through the configured Stripe payment flow.</small></p></div>
+      </div>
     </aside>
   </header>
-  <section class="donations-grid" aria-label="Fundraising campaigns">
-    $cards
+  <section class="donations-campaigns" id="donation-campaigns" aria-label="Fundraising campaigns">
+    <div class="donations-section-heading">
+      <p class="kicker">Active campaigns</p>
+      <h2>Choose where your support goes</h2>
+    </div>
+    <div class="donations-grid">
+      $cards
+    </div>
   </section>
 </article>
 HTML
@@ -2853,7 +2863,7 @@ sub _write_donation_detail_page {
     return unless length $slug;
     my $title = escape_html($campaign->{title} || 'Donation campaign');
     my $summary = escape_html($campaign->{summary} || '');
-    my $body = _donation_static_body_html($campaign->{body} || $campaign->{summary} || '');
+    my $body = DesertCMS::Donations::campaign_body_html($campaign->{body} || $campaign->{summary} || '');
     my $image = escape_html($campaign->{image_path} || '');
     my $image_html = length $image ? qq{<figure class="donation-detail-media"><img src="$image" alt=""></figure>} : '';
     my $progress = _donation_static_progress($campaign);
@@ -2868,16 +2878,24 @@ sub _write_donation_detail_page {
     </div>
     $image_html
   </header>
-  <div class="donation-detail-layout">
-    <section class="donation-story" aria-labelledby="donation-story-heading">
-      <h2 id="donation-story-heading">Where your donation goes</h2>
-      <div class="body donation-body">$body</div>
-    </section>
-    <aside class="donation-sidebar" aria-label="Donation options">
-      $progress
+  <section class="donation-priority" aria-label="Donate to $title">
+    <div class="donation-priority-copy">
+      <p class="kicker">Give now</p>
+      <h2>Support this campaign</h2>
+      <p>Choose a suggested amount or enter a custom donation, then continue through secure Stripe checkout.</p>
+    </div>
+    <div class="donation-priority-actions">
       $form
-    </aside>
-  </div>
+      $progress
+    </div>
+  </section>
+  <section class="donation-story" aria-labelledby="donation-story-heading">
+    <div class="donation-story-heading">
+      <p class="kicker">Campaign story</p>
+      <h2 id="donation-story-heading">Where your donation goes</h2>
+    </div>
+    <div class="body donation-body">$body</div>
+  </section>
   <p class="donation-back"><a href="/donate/">Back to all campaigns</a></p>
 </article>
 HTML
@@ -2913,16 +2931,23 @@ sub _donation_static_card {
     my $meter = $goal > 0 && $campaign->{show_goal}
         ? qq{<div class="donation-meter" aria-hidden="true"><span style="width: $pct%"></span></div>}
         : '';
+    my $image = escape_html($campaign->{image_path} || '');
+    my $image_html = length $image
+        ? qq{<span class="donation-card-media"><img src="$image" alt="" loading="lazy"></span>}
+        : qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
     return <<"HTML";
 <a class="donation-card" href="/donate/$slug/">
-  <span class="donation-card-kicker">Campaign</span>
-  <h2>$title</h2>
-  <p>$summary</p>
-  <div class="donation-card-progress">
-    <strong>$raised raised$goal_label</strong>
-    $meter
+  $image_html
+  <div class="donation-card-body">
+    <span class="donation-card-top"><span class="donation-card-kicker">Campaign</span><span class="donation-card-open">Open campaign</span></span>
+    <h3>$title</h3>
+    <p>$summary</p>
+    <span class="donation-card-progress">
+      <strong>$raised raised$goal_label</strong>
+      $meter
+    </span>
+    <span class="donation-card-action">Give to this campaign</span>
   </div>
-  <span class="donation-card-action">Donate to this campaign</span>
 </a>
 HTML
 }
@@ -2997,15 +3022,6 @@ sub _donation_static_form {
   </form>
 </section>
 HTML
-}
-
-sub _donation_static_body_html {
-    my ($text) = @_;
-    my $safe = escape_html($text || '');
-    $safe =~ s{\r\n?}{\n}g;
-    $safe =~ s{\n\n+}{</p><p>}g;
-    $safe =~ s{\n}{<br>}g;
-    return length $safe ? "<p>$safe</p>" : '<p>Donation details will appear here.</p>';
 }
 
 sub _write_testimonials_pages {

@@ -500,6 +500,59 @@ sub progress_percent {
     return $pct > 100 ? 100 : $pct;
 }
 
+sub campaign_body_html {
+    my ($text) = @_;
+    $text = '' unless defined $text;
+    $text =~ s{\r\n?}{\n}g;
+    my @chunks = grep { length } map { _trim($_) } split /\n{2,}/, $text;
+    return '<p>Donation details will appear here.</p>' unless @chunks;
+
+    my $html = '';
+    for my $chunk (@chunks) {
+        my @lines = grep { length } map { _trim($_) } split /\n/, $chunk;
+        next unless @lines;
+        if (@lines >= 3 && _body_lines_look_like_list(@lines)) {
+            $html .= '<ul class="donation-body-list">';
+            $html .= join '', map { '<li>' . escape_html($_) . '</li>' } @lines;
+            $html .= '</ul>';
+        } elsif (@lines == 1 && _body_line_looks_like_heading($lines[0])) {
+            $html .= '<h3>' . escape_html($lines[0]) . '</h3>';
+        } else {
+            $html .= '<p>' . join('<br>', map { escape_html($_) } @lines) . '</p>';
+        }
+    }
+
+    return length $html ? $html : '<p>Donation details will appear here.</p>';
+}
+
+sub _body_lines_look_like_list {
+    my (@lines) = @_;
+    return 0 unless @lines >= 3;
+    for my $line (@lines) {
+        return 0 if length($line) > 90;
+        return 0 if $line =~ /[.!?]\z/;
+    }
+    return 1;
+}
+
+sub _body_line_looks_like_heading {
+    my ($line) = @_;
+    return 0 unless defined $line && length $line;
+    return 0 if length($line) > 90;
+    return 0 if $line =~ /[.:!?]\z/;
+    return 0 if $line =~ m{https?://}i;
+    my @words = grep { length } split /\s+/, $line;
+    return 0 if @words > 10;
+    return $line =~ /[A-Za-z]/ ? 1 : 0;
+}
+
+sub _trim {
+    my ($value) = @_;
+    $value = '' unless defined $value;
+    $value =~ s/\A\s+|\s+\z//g;
+    return $value;
+}
+
 sub _mark_donation_paid {
     my ($self, $session, $event_id) = @_;
     my $donation = $self->_donation_from_session($session) or die "matching donation not found";

@@ -55,10 +55,6 @@ DesertCMS::Settings::set_many($config, $db, {
     docs_title            => 'Documentation',
     docs_intro            => 'Site Management and Technical documentation for running, operating, and extending DesertCMS.',
     docs_source_dir       => '',
-    commerce_model        => 'disabled',
-    shop_enabled          => 0,
-    shop_domain           => '',
-    shop_url              => '',
 });
 
 my $docs = _upsert_page(
@@ -104,10 +100,6 @@ DesertCMS::Settings::set_many($config, $db, {
     docs_title          => 'Documentation',
     docs_intro          => 'Site Management and Technical documentation for running, operating, and extending DesertCMS.',
     docs_source_dir     => '',
-    commerce_model      => 'disabled',
-    shop_enabled        => 0,
-    shop_domain         => '',
-    shop_url            => '',
 });
 
 DesertCMS::Navigation::replace_from_text(

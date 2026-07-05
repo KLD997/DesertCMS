@@ -7,6 +7,7 @@ use FindBin;
 use lib "$FindBin::Bin/../lib";
 
 use DesertCMS::HTTP;
+use DesertCMS::Security qw(security_headers);
 
 my $response = _capture_response(sub {
     DesertCMS::HTTP->reset_response_state;
@@ -23,6 +24,12 @@ my $response = _capture_response(sub {
 like($response, qr/\AStatus: 200 OK\r?\n/, 'response starts with CGI status header');
 unlike($response, qr/^Content-Length:/mi, 'dynamic CGI responses do not emit Content-Length');
 ok(DesertCMS::HTTP->response_sent, 'response_sent tracks emitted responses');
+my %security = security_headers();
+like(
+    $security{'Content-Security-Policy'},
+    qr/form-action 'self' https:\/\/checkout\.stripe\.com https:\/\/billing\.stripe\.com https:\/\/connect\.stripe\.com/,
+    'CSP allows Stripe-hosted checkout, billing portal, and Connect redirects after self-hosted form posts'
+);
 
 DesertCMS::HTTP->reset_response_state;
 ok(!DesertCMS::HTTP->response_sent, 'response state can be reset for the next request');

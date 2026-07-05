@@ -21,8 +21,9 @@ sub security_headers {
             $img_src .= " $source";
         }
     }
+    my $form_action = "form-action 'self' https://checkout.stripe.com https://billing.stripe.com https://connect.stripe.com";
     return (
-        'Content-Security-Policy' => "default-src 'self'; $img_src; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        'Content-Security-Policy' => "default-src 'self'; $img_src; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; $form_action",
         'X-Content-Type-Options'  => 'nosniff',
         'X-Frame-Options'         => 'DENY',
         'Referrer-Policy'         => 'same-origin',

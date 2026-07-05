@@ -12,7 +12,7 @@ It is built around three major ideas:
 
 The formal hosted site is [desertcms.com](https://desertcms.com/).
 
-Current release: DesertCMS v2.0. The v2 launch includes faster backend request startup, cacheable admin assets, UTF-8 form decoding for rich text edits, and release artifacts at [desertcms.com/download](https://desertcms.com/download/).
+Current release: DesertCMS v2.0.2. This patch release fixes Stripe-hosted payment redirects from public donation and commerce forms, while keeping the refreshed public Donations / Fundraising experience available at [desertcms.com/download](https://desertcms.com/download/).
 
 ## Documentation
 Start with:

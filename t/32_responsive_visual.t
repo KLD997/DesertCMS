@@ -28,8 +28,9 @@ like($site_css, qr{\.event-ticket-option \{ grid-template-columns: minmax\(0, 1f
 like($site_css, qr{\.event-ticket-form \{ min-width: 0; grid-template-columns: minmax\(70px, 92px\) minmax\(0, 1fr\) minmax\(112px, auto\); \}}, 'public Events ticket forms use shrink-safe tracks');
 like($site_css, qr{\@media \(max-width: 760px\) \{\s*\.event-ticket-option,\s*\.event-ticket-form \{ grid-template-columns: 1fr; \}}s, 'public Events ticket rows stack before narrow tablet layouts crowd');
 like($site_css, qr{\.module-action-link,\s*\.shop-button,\s*\.rights-option button,\s*\.event-ticket-form button \{[\s\S]*?white-space: normal; overflow-wrap: anywhere;}, 'public module action buttons wrap long labels');
-like($site_css, qr{DesertCMS component upgrade: public donations}, 'public Donations pages have a dedicated upgrade marker');
-like($site_css, qr{\.donation-detail-layout \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(min\(100%, 300px\), 380px\);}, 'public Donations detail keeps story and donate panel in stable tracks');
+like($site_css, qr{DesertCMS component upgrade: public donations v2}, 'public Donations pages have a dedicated upgrade marker');
+like($site_css, qr{\.donation-priority \{ display: grid; grid-template-columns: minmax\(220px, 0\.52fr\) minmax\(0, 1\.48fr\);}, 'public Donations detail puts the donate section in stable top tracks');
+like($site_css, qr{\.donation-body-list \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\);}, 'public Donations campaign body lists wrap into readable tiles');
 like($site_css, qr{\.donation-amount-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 106px\), 1fr\)\);}, 'public Donations amount options wrap as buttons');
 like($site_css, qr{\.public-upload-preview \{ grid-template-columns: 38px minmax\(0, 1fr\); \}}, 'public upload previews compact cleanly on phones');
 like($site_css, qr{\.link-card:hover,\s*\.resource-card:hover,\s*\.content-ref-card:hover,\s*\.social-link:hover}m, 'public cards share hover treatment');
@@ -47,7 +48,7 @@ like($theme, qr{DesertCMS component upgrade: docs resource hub}, 'docs Resource 
 like($theme, qr{_ensure_public_event_ticket_wrap_css}, 'theme installer upgrades existing public Events ticket controls');
 like($theme, qr{DesertCMS component upgrade: public event ticket wrapping}, 'public Events ticket wrapping upgrade block is marked to avoid duplicate appends');
 like($theme, qr{_ensure_donations_css}, 'theme installer upgrades existing public Donations layout');
-like($theme, qr{DesertCMS component upgrade: public donations}, 'public Donations upgrade block is marked to avoid duplicate appends');
+like($theme, qr{DesertCMS component upgrade: public donations v2}, 'public Donations upgrade block is marked to avoid duplicate appends');
 like($theme, qr{_ensure_public_map_tap_target_css}, 'theme installer upgrades existing map controls');
 like($theme, qr{_ensure_map_locations_css}, 'theme installer upgrades existing map location-kind CSS');
 like($theme, qr{_ensure_map_locations_js}, 'theme installer upgrades existing map location-kind script');
