@@ -1,6 +1,6 @@
 .tools/
 data/
-dist/
+dist/*
 local/
 
 *.sqlite
@@ -13,3 +13,9 @@ local/
 .env.*
 *.pem
 *.key
+
+!dist/
+!dist/desertcms-openbsd-runtime-v2.tar.gz
+!dist/desertcms-openbsd-runtime-v2.tar.gz.sha256
+!dist/desertcms-source-v2.tar.gz
+!dist/desertcms-source-v2.tar.gz.sha256
