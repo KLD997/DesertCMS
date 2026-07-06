@@ -42,7 +42,13 @@ if ($command eq 'backup') {
 
 if ($command eq 'rebuild') {
     require DesertCMS::Content;
+    require DesertCMS::Media;
     $db->migrate;
+    my $media = DesertCMS::Media->new(config => $config, db => $db);
+    my $repair = $media->repair_public_image_formats;
+    if ($repair->{repaired} || $repair->{failed}) {
+        print "repaired $repair->{repaired} legacy public image format(s), failed $repair->{failed}\n";
+    }
     my $content = DesertCMS::Content->new(config => $config, db => $db);
     my $count = $content->rebuild_all;
     print "rebuilt $count published item(s)\n";

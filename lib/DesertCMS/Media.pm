@@ -667,6 +667,92 @@ sub update_alt_text {
     return $self->{db}->dbh->selectrow_hashref('SELECT * FROM media_assets WHERE id = ?', undef, $id);
 }
 
+sub repair_public_image_formats {
+    my ($self) = @_;
+    my $dbh = $self->{db}->dbh;
+    my $rows = $dbh->selectall_arrayref(
+        q{
+            SELECT *
+            FROM media_assets
+            WHERE deleted_at IS NULL
+              AND mime_type IN ('image/png', 'image/webp')
+              AND public_path LIKE '/assets/media/%.jpg'
+            ORDER BY id ASC
+        },
+        { Slice => {} }
+    );
+    my %result = (
+        checked            => scalar @{$rows || []},
+        repaired           => 0,
+        skipped            => 0,
+        failed             => 0,
+        references_updated => 0,
+        errors             => [],
+    );
+    return \%result unless @{$rows || []};
+
+    my $media_dir = File::Spec->catdir($self->{config}->get('public_root'), 'assets', 'media');
+    make_path($media_dir) unless -d $media_dir;
+
+    for my $asset (@{$rows}) {
+        my $old_rel = $asset->{public_path} || '';
+        my ($path_hash) = $old_rel =~ m{\A/assets/media/([0-9a-f]{64})\.jpg\z};
+        my $checksum = lc($asset->{checksum_sha256} || $path_hash || '');
+        my $public_ext = _public_image_extension($asset->{mime_type});
+        my $new_rel = $checksum =~ /\A[0-9a-f]{64}\z/ ? "/assets/media/$checksum.$public_ext" : '';
+        if (!length($new_rel) || $new_rel eq $old_rel || !-f ($asset->{storage_path} || '')) {
+            $result{skipped}++;
+            next;
+        }
+
+        my $new_file = File::Spec->catfile($self->{config}->get('public_root'), 'assets', 'media', "$checksum.$public_ext");
+        my $ok = eval {
+            $self->_create_derivative($asset->{storage_path}, $new_file, max_width => $self->_public_max_width);
+            my ($width, $height) = $self->_identify($new_file);
+            my $derivatives = $self->_create_responsive_derivatives(
+                $asset->{storage_path},
+                $checksum,
+                $public_ext,
+                $new_rel,
+                $width,
+                $height,
+            );
+
+            $dbh->begin_work;
+            $dbh->do(
+                q{
+                    UPDATE media_assets
+                    SET public_path = ?, width = ?, height = ?, derivatives_json = ?
+                    WHERE id = ? AND deleted_at IS NULL AND public_path = ?
+                },
+                undef,
+                $new_rel,
+                $width,
+                $height,
+                encode_json($derivatives),
+                int($asset->{id}),
+                $old_rel
+            );
+            $result{references_updated} += _replace_public_image_references($dbh, $old_rel, $new_rel);
+            $dbh->commit;
+            1;
+        };
+        if ($ok) {
+            $result{repaired}++;
+        } else {
+            my $err = $@ || 'unknown public image repair failure';
+            eval { $dbh->rollback if !$dbh->{AutoCommit} };
+            $result{failed}++;
+            push @{ $result{errors} }, {
+                id    => int($asset->{id} || 0),
+                path  => $old_rel,
+                error => "$err",
+            };
+        }
+    }
+    return \%result;
+}
+
 sub asset_quality {
     my ($self, %args) = @_;
     my $asset = $args{asset};
@@ -2288,6 +2374,53 @@ sub _unlink_public_resource_if_unused {
     my $file = File::Spec->catfile($self->{config}->get('public_root'), split m{/}, substr($public_path, 1));
     return unless _is_under($file, $self->{config}->get('public_root'));
     unlink $file if -f $file;
+}
+
+sub _replace_public_image_references {
+    my ($dbh, $old_rel, $new_rel) = @_;
+    return 0 unless length($old_rel || '') && length($new_rel || '');
+    my $updated = 0;
+
+    for my $spec (
+        [ content_items      => feature_image_path => 'value' ],
+        [ content_revisions  => feature_image_path => 'value' ],
+        [ events             => feature_image_path => 'value' ],
+        [ directory_entries  => image_path         => 'value' ],
+        [ booking_services   => image_path         => 'value' ],
+        [ donation_campaigns => image_path         => 'value' ],
+        [ testimonials       => image_path         => 'value' ],
+        [ content_items      => body_json          => 'text' ],
+        [ content_revisions  => body_json          => 'text' ],
+        [ page_templates     => body_json          => 'text' ],
+        [ builder_sections   => body_json          => 'text' ],
+    ) {
+        my ($table, $column, $kind) = @{$spec};
+        if ($kind eq 'value') {
+            $updated += _rows_changed($dbh->do(
+                "UPDATE $table SET $column = ? WHERE $column = ?",
+                undef,
+                $new_rel,
+                $old_rel
+            ));
+        } else {
+            $updated += _rows_changed($dbh->do(
+                "UPDATE $table SET $column = REPLACE($column, ?, ?) WHERE $column LIKE ?",
+                undef,
+                $old_rel,
+                $new_rel,
+                '%' . $old_rel . '%'
+            ));
+        }
+    }
+
+    return $updated;
+}
+
+sub _rows_changed {
+    my ($rows) = @_;
+    return 0 unless defined $rows;
+    return 0 if "$rows" eq '0E0';
+    return int($rows);
 }
 
 sub _unlink_private_preview_if_unused {

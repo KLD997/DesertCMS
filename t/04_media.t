@@ -242,6 +242,122 @@ my $transparent_derivatives = decode_json($transparent_asset->{derivatives_json}
 my @transparent_sizes = @{$transparent_derivatives->{sizes} || []};
 ok((grep { ($_->{path} || '') =~ m{/assets/media/[0-9a-f]{64}-480\.png\z} } @transparent_sizes), 'transparent PNG stores PNG responsive derivative');
 ok(!(grep { ($_->{path} || '') =~ /\.jpg\z/ } @transparent_sizes), 'transparent PNG responsive metadata does not point at flattened JPEGs');
+
+my $legacy_hash = 'f' x 64;
+my $legacy_old_path = "/assets/media/$legacy_hash.jpg";
+my $legacy_new_path = "/assets/media/$legacy_hash.png";
+my $legacy_source = File::Spec->catfile($root, 'legacy-transparent.png');
+my @legacy_cmd = $tool_mode eq 'vips'
+    ? (_sibling_command($image_tool, 'vips'), 'black', $legacy_source, 960, 480, '--bands', 4)
+    : _image_tool_cmd($image_tool, $tool_mode, 'convert', '-size', '960x480', 'xc:none', $legacy_source);
+system @legacy_cmd;
+is($?, 0, 'created legacy transparent PNG source');
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 960, 480, ?, ?, ?, ?)
+    },
+    undef,
+    'legacy-transparent.png',
+    $legacy_source,
+    $legacy_old_path,
+    'Legacy transparent art',
+    'Legacy transparent art',
+    'A legacy transparent PNG flattened to JPG before repair.',
+    -s $legacy_source,
+    $legacy_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$legacy_hash-480.jpg", width => 480, height => 240 },
+            { label => 'display', path => $legacy_old_path, width => 960, height => 480 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
+my $legacy_media_id = $db->dbh->sqlite_last_insert_rowid;
+my $legacy_body_json = encode_json([{ type => 'image', src => $legacy_old_path, alt => 'Legacy transparent art' }]);
+$db->dbh->do(
+    q{
+        INSERT INTO content_items
+            (type, title, slug, status, feature_image_path, body_json, created_at, updated_at)
+        VALUES
+            ('page', 'Legacy Media Page', 'legacy-media-page', 'draft', ?, ?, ?, ?)
+    },
+    undef,
+    $legacy_old_path,
+    $legacy_body_json,
+    time,
+    time
+);
+$db->dbh->do(
+    q{
+        INSERT INTO page_templates
+            (name, slug, body_json, created_at, updated_at)
+        VALUES
+            ('Legacy Media Template', 'legacy-media-template', ?, ?, ?)
+    },
+    undef,
+    $legacy_body_json,
+    time,
+    time
+);
+$db->dbh->do(
+    q{
+        INSERT INTO builder_sections
+            (name, slug, body_json, created_at, updated_at)
+        VALUES
+            ('Legacy Media Section', 'legacy-media-section', ?, ?, ?)
+    },
+    undef,
+    $legacy_body_json,
+    time,
+    time
+);
+$db->dbh->do(
+    q{
+        INSERT INTO donation_campaigns
+            (title, slug, status, image_path, created_at, updated_at)
+        VALUES
+            ('Legacy Campaign', 'legacy-campaign', 'draft', ?, ?, ?)
+    },
+    undef,
+    $legacy_old_path,
+    time,
+    time
+);
+my $repair = $media->repair_public_image_formats;
+is($repair->{checked}, 1, 'legacy public image repair finds flattened PNG row');
+is($repair->{repaired}, 1, 'legacy public image repair regenerates PNG derivative');
+is($repair->{failed}, 0, 'legacy public image repair has no failures');
+ok($repair->{references_updated} >= 4, 'legacy public image repair updates stored public references');
+my $legacy_repaired = $db->dbh->selectrow_hashref('SELECT * FROM media_assets WHERE id = ?', undef, $legacy_media_id);
+is($legacy_repaired->{public_path}, $legacy_new_path, 'legacy public image repair updates media public path to PNG');
+my $legacy_meta = decode_json($legacy_repaired->{derivatives_json} || '{}');
+my @legacy_sizes = @{$legacy_meta->{sizes} || []};
+ok((grep { ($_->{path} || '') eq "/assets/media/$legacy_hash-480.png" } @legacy_sizes), 'legacy public image repair writes PNG responsive derivative metadata');
+ok(!(grep { ($_->{path} || '') =~ /\.jpg\z/ } @legacy_sizes), 'legacy public image repair removes flattened JPEG derivative metadata');
+my $legacy_public = File::Spec->catfile($root, 'public', split m{/}, substr($legacy_new_path, 1));
+ok(-f $legacy_public, 'legacy public image repair creates PNG public derivative');
+my ($legacy_feature, $legacy_body) = $db->dbh->selectrow_array('SELECT feature_image_path, body_json FROM content_items WHERE slug = ?', undef, 'legacy-media-page');
+is($legacy_feature, $legacy_new_path, 'legacy public image repair updates content feature image path');
+like($legacy_body, qr{\Q$legacy_new_path\E}, 'legacy public image repair updates content body image source');
+unlike($legacy_body, qr{\Q$legacy_old_path\E}, 'legacy public image repair removes old content body image source');
+my ($legacy_template_body) = $db->dbh->selectrow_array('SELECT body_json FROM page_templates WHERE slug = ?', undef, 'legacy-media-template');
+like($legacy_template_body, qr{\Q$legacy_new_path\E}, 'legacy public image repair updates page template image source');
+my ($legacy_section_body) = $db->dbh->selectrow_array('SELECT body_json FROM builder_sections WHERE slug = ?', undef, 'legacy-media-section');
+like($legacy_section_body, qr{\Q$legacy_new_path\E}, 'legacy public image repair updates builder section image source');
+my ($legacy_campaign_image) = $db->dbh->selectrow_array('SELECT image_path FROM donation_campaigns WHERE slug = ?', undef, 'legacy-campaign');
+is($legacy_campaign_image, $legacy_new_path, 'legacy public image repair updates donation campaign image path');
+$db->dbh->do('UPDATE content_items SET deleted_at = ? WHERE slug = ?', undef, time, 'legacy-media-page');
+$db->dbh->do('DELETE FROM page_templates WHERE slug = ?', undef, 'legacy-media-template');
+$db->dbh->do('DELETE FROM builder_sections WHERE slug = ?', undef, 'legacy-media-section');
+$db->dbh->do('DELETE FROM donation_campaigns WHERE slug = ?', undef, 'legacy-campaign');
+ok($media->delete_asset(id => $legacy_media_id)->{deleted_at}, 'legacy repaired PNG test asset deletes cleanly');
+
 ok($media->delete_asset(id => $transparent_asset->{id})->{deleted_at}, 'transparent PNG test asset deletes cleanly');
 
 my ($listing_active, $personal_enabled) = $db->dbh->selectrow_array(
