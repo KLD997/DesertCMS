@@ -214,6 +214,36 @@ ok($deleted->{deleted_at}, 'delete returns deleted timestamp');
 my ($visible_assets) = $db->dbh->selectrow_array('SELECT COUNT(*) FROM media_assets WHERE deleted_at IS NULL');
 is($visible_assets, 0, 'deleted media is hidden from active media list');
 is(scalar @{$media->list_assets}, 0, 'deleted media is omitted from media list');
+
+my $transparent_source = File::Spec->catfile($root, 'transparent-logo.png');
+my @transparent_cmd = $tool_mode eq 'vips'
+    ? (_sibling_command($image_tool, 'vips'), 'black', $transparent_source, 1200, 600, '--bands', 4)
+    : _image_tool_cmd($image_tool, $tool_mode, 'convert', '-size', '1200x600', 'xc:none', $transparent_source);
+system @transparent_cmd;
+is($?, 0, 'created transparent PNG image');
+ok(-f $transparent_source, 'transparent PNG source exists');
+my $transparent_asset = $media->store_upload(
+    filename => 'transparent-logo.png',
+    mime_type => 'image/png',
+    content => _read_binary($transparent_source),
+    alt_text => 'Transparent logo',
+    seo_title => 'Transparent campaign logo',
+    seo_description => 'A transparent PNG used for module campaign artwork.',
+);
+like($transparent_asset->{public_path}, qr{\A/assets/media/[0-9a-f]{64}\.png\z}, 'transparent PNG keeps PNG public derivative');
+ok(DesertCMS::Media::is_public_image_path($transparent_asset->{public_path}), 'transparent PNG derivative is accepted as public image');
+my $transparent_public = File::Spec->catfile($root, 'public', split m{/}, substr($transparent_asset->{public_path}, 1));
+ok(-f $transparent_public, 'transparent PNG public derivative exists');
+open my $png_fh, '<:raw', $transparent_public or die "cannot read $transparent_public: $!";
+read $png_fh, my $png_magic, 8;
+close $png_fh;
+is($png_magic, "\x89PNG\x0d\x0a\x1a\x0a", 'transparent public derivative is a PNG file');
+my $transparent_derivatives = decode_json($transparent_asset->{derivatives_json} || '{}');
+my @transparent_sizes = @{$transparent_derivatives->{sizes} || []};
+ok((grep { ($_->{path} || '') =~ m{/assets/media/[0-9a-f]{64}-480\.png\z} } @transparent_sizes), 'transparent PNG stores PNG responsive derivative');
+ok(!(grep { ($_->{path} || '') =~ /\.jpg\z/ } @transparent_sizes), 'transparent PNG responsive metadata does not point at flattened JPEGs');
+ok($media->delete_asset(id => $transparent_asset->{id})->{deleted_at}, 'transparent PNG test asset deletes cleanly');
+
 my ($listing_active, $personal_enabled) = $db->dbh->selectrow_array(
     'SELECT active, personal_enabled FROM shop_listings WHERE media_asset_id = ?',
     undef,

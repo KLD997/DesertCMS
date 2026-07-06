@@ -93,6 +93,33 @@ like(_module_catalog_text($catalog), qr/Donations \/ Fundraising.*fundraising ca
 like(_module_catalog_text($catalog), qr/Donation Payments.*Stripe Checkout donations, marketplace payouts, platform fees/s, 'feature catalog describes separate Donation Payments entitlement');
 
 my $donations = DesertCMS::Donations->new(config => $config, db => $db);
+my $campaign_image_hash = 'd' x 64;
+my $campaign_image_path = "/assets/media/$campaign_image_hash.png";
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 1200, 600, 2048, ?, ?, ?)
+    },
+    undef,
+    'transparent-campaign.png',
+    "$root/originals/transparent-campaign.png",
+    $campaign_image_path,
+    'Transparent campaign art',
+    'Transparent campaign art',
+    'A transparent PNG campaign image.',
+    $campaign_image_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$campaign_image_hash-480.png", width => 480, height => 240 },
+            { label => 'display', path => $campaign_image_path, width => 1200, height => 600 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
 my $campaign = $donations->save_campaign(
     title                 => 'Archive Fund',
     slug                  => 'archive-fund',
@@ -106,6 +133,7 @@ my $campaign = $donations->save_campaign(
     donor_message_enabled => 1,
     show_goal             => 1,
     featured              => 1,
+    image_path            => $campaign_image_path,
 );
 ok($campaign->{id}, 'donation campaign is saved');
 is($campaign->{goal_amount_cents}, 500000, 'donation campaign stores goal amount in cents');
@@ -131,10 +159,12 @@ like($donate_html, qr{Help preserve community materials}, 'donations index rende
 like($donate_html, qr{class="content module-page donations-page donations-shell"}, 'donations index uses the dedicated public donations shell');
 like($donate_html, qr{How to give.*Choose a campaign.*Select an amount.*Donate securely}s, 'donations index explains how visitors can donate');
 like($donate_html, qr{class="donation-card".*Open campaign.*Give to this campaign}s, 'donations index campaign card has obvious campaign and donation actions');
+like($donate_html, qr{donation-card-media"><img src="/assets/media/d{64}\.png" alt="Transparent campaign art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/d{64}-480\.png 480w[^"]*/assets/media/d{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px">}, 'donations index campaign card renders transparent PNG media responsively');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'donate', 'archive-fund', 'index.html'));
 like($detail_html, qr{Funds support scanning}, 'donation detail renders campaign body');
 like($detail_html, qr{donation-priority.*Online donations are not available.*Campaign story.*Where your donation goes}s, 'donation detail puts donation options before the campaign story');
+like($detail_html, qr{donation-detail-media"><img src="/assets/media/d{64}\.png" alt="Transparent campaign art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/d{64}-480\.png 480w[^"]*/assets/media/d{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 460px">}, 'donation detail renders transparent PNG media responsively without forcing a JPEG');
 like($detail_html, qr{USD 0\.00.*of USD 5000\.00 goal}s, 'donation detail renders goal progress');
 like($detail_html, qr{Online donations are not available}, 'donation detail hides checkout when payments are not ready');
 unlike($detail_html, qr{Donate with Stripe}, 'donation detail omits Stripe button when checkout is unavailable');
@@ -157,6 +187,7 @@ like($public_detail, qr{<link rel="stylesheet" href="/assets/site\.css">}, 'dyna
 like($public_detail, qr{<script src="/assets/site\.js"></script>}, 'dynamic donation detail route uses CSP-compatible public shell script');
 like($public_detail, qr{data-analytics-enabled="1"}, 'dynamic donation detail route enables analytics without inline script');
 unlike($public_detail, qr{document\.querySelector\('\[data-theme-toggle\]'\)}, 'dynamic donation detail route does not emit inline theme toggle script');
+like($public_detail, qr{donation-detail-media"><img src="/assets/media/d{64}\.png" alt="Transparent campaign art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/d{64}-480\.png 480w[^"]*/assets/media/d{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 460px">}, 'dynamic donation detail route renders transparent PNG media responsively');
 unlike($public_detail, qr{/admin/assets/admin\.css|href="/admin"}, 'dynamic donation detail route does not expose the admin shell or admin brand link');
 like($public_detail, qr{donation-panel--unavailable}, 'dynamic donation detail route renders styled unavailable payment state');
 

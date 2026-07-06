@@ -11,6 +11,7 @@ use DesertCMS::Config;
 use DesertCMS::DB;
 use DesertCMS::Email qw(send_postmark);
 use DesertCMS::HTTP ();
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(
@@ -1611,7 +1612,7 @@ sub _timezone {
 sub _feature_image {
     my ($value) = @_;
     $value = _trim($value, 300);
-    return $value if $value =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $value if DesertCMS::Media::is_public_image_path($value);
     return '';
 }
 

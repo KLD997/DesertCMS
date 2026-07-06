@@ -19,6 +19,7 @@ use DesertCMS::Docs;
 use DesertCMS::Events;
 use DesertCMS::Federation;
 use DesertCMS::FontPackages;
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Navigation;
 use DesertCMS::Newsletter;
@@ -331,7 +332,7 @@ sub _render_blocks {
             $html .= qq{<pre class="code-block"><code$class>$code</code></pre>\n};
         } elsif (($block->{type} || '') eq 'image') {
             my $src = $block->{src} || '';
-            next unless $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+            next unless DesertCMS::Media::is_public_image_path($src);
             my $asset = $media_assets->{$src} || {};
             my $alt = $block->{alt} || $asset->{alt_text} || '';
             my $caption = escape_html($block->{caption} || '');
@@ -345,7 +346,7 @@ sub _render_blocks {
             $html .= qq{<figure class="$class">$image$figcaption</figure>\n};
         } elsif (($block->{type} || '') eq 'image_text') {
             my $src = $block->{src} || '';
-            if ($src !~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z}) {
+            if (!DesertCMS::Media::is_public_image_path($src)) {
                 my $fallback = rich_paragraphs_html($block->{html}, $block->{text});
                 my $align_class = join ' ', _rich_text_align_class($block->{align}), _text_style_class($block->{font}, $block->{text_size});
                 if (length plain_text_from_rich_html($fallback)) {
@@ -565,14 +566,14 @@ sub contributor_request_form_html {
 sub _content_card_image {
     my ($item) = @_;
     my $feature = $item->{feature_image_path} || '';
-    return $feature if $feature =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $feature if DesertCMS::Media::is_public_image_path($feature);
 
     my $blocks = eval { decode_json($item->{body_json} || '[]') } || [];
     for my $block (@{$blocks}) {
         next unless ref $block eq 'HASH';
         next unless ($block->{type} || '') eq 'image' || ($block->{type} || '') eq 'image_text';
         my $src = $block->{src} || '';
-        return $src if $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        return $src if DesertCMS::Media::is_public_image_path($src);
     }
     return '';
 }
@@ -664,7 +665,7 @@ sub _media_asset_map {
     for my $block (@{$blocks}) {
         next unless ref $block eq 'HASH' && (($block->{type} || '') eq 'image' || ($block->{type} || '') eq 'image_text');
         my $src = $block->{src} || '';
-        next unless $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        next unless DesertCMS::Media::is_public_image_path($src);
         $paths{$src} = 1;
     }
     return {} unless %paths;
@@ -703,7 +704,7 @@ sub _resource_asset_map {
 
 sub _media_asset_for_path {
     my ($db, $path) = @_;
-    return {} unless $db && defined $path && $path =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return {} unless $db && DesertCMS::Media::is_public_image_path($path);
     return $db->dbh->selectrow_hashref(
         q{
             SELECT public_path, alt_text, seo_title, seo_description, width, height, derivatives_json
@@ -719,6 +720,7 @@ sub _media_asset_for_path {
 
 sub _media_img_tag {
     my ($src, $alt, $asset, %opts) = @_;
+    $alt = $asset->{alt_text} || '' if $asset && (!defined $alt || !length $alt);
     my @attrs = (
         'src="' . escape_html($src || '') . '"',
         'alt="' . escape_html($alt || '') . '"',
@@ -747,7 +749,7 @@ sub _media_srcset {
     for my $size (sort { int($a->{width} || 0) <=> int($b->{width} || 0) } grep { ref $_ eq 'HASH' } @{$sizes}) {
         my $path = $size->{path} || '';
         my $width = int($size->{width} || 0);
-        next unless $path =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.jpg\z};
+        next unless DesertCMS::Media::is_public_image_variant_path($path);
         next unless $width > 0;
         next if $seen{$width}++;
         push @entries, "$path ${width}w";
@@ -1645,7 +1647,7 @@ sub _showcase_items {
             FROM media_assets
             WHERE deleted_at IS NULL
               AND (
-                    public_path LIKE '/assets/media/%.jpg'
+                    public_path LIKE '/assets/media/%'
                  OR public_path LIKE '/assets/resources/%'
               )
             ORDER BY created_at DESC, id DESC
@@ -1796,8 +1798,8 @@ sub _open_contributor_db {
 sub _safe_showcase_image_src {
     my ($src) = @_;
     $src = '' unless defined $src;
-    return 1 if $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
-    return 1 if $src =~ m{\Ahttps://([a-z0-9.-]+)/assets/media/[0-9a-f]{64}\.jpg\z} && _safe_contributor_domain($1);
+    return 1 if DesertCMS::Media::is_public_image_path($src);
+    return 1 if $src =~ m{\Ahttps://([a-z0-9.-]+)/assets/media/[0-9a-f]{64}\.(?:jpg|png|webp)\z} && _safe_contributor_domain($1);
     return 0;
 }
 
@@ -2810,7 +2812,7 @@ sub _write_donation_pages {
     my $safe_intro = escape_html($intro);
     my $cards = '';
     for my $campaign (@{ $donations->published_campaigns(limit => 500) }) {
-        $cards .= _donation_static_card($campaign);
+        $cards .= _donation_static_card($db, $campaign);
         _write_donation_detail_page($config, $db, $donations, $campaign);
     }
     $cards ||= '<p class="donation-empty">No fundraising campaigns yet.</p>';
@@ -2865,8 +2867,13 @@ sub _write_donation_detail_page {
     my $title = escape_html($campaign->{title} || 'Donation campaign');
     my $summary = escape_html($campaign->{summary} || '');
     my $body = DesertCMS::Donations::campaign_body_html($campaign->{body} || $campaign->{summary} || '');
-    my $image = escape_html($campaign->{image_path} || '');
-    my $image_html = length $image ? qq{<figure class="donation-detail-media"><img src="$image" alt=""></figure>} : '';
+    my $image = $campaign->{image_path} || '';
+    my $image_html = '';
+    if (DesertCMS::Media::is_public_image_path($image)) {
+        my $asset = _media_asset_for_path($db, $image);
+        my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager');
+        $image_html = qq{<figure class="donation-detail-media">$img</figure>};
+    }
     my $progress = _donation_static_progress($campaign);
     my $form = _donation_static_form($donations, $campaign);
     my $content = <<"HTML";
@@ -2919,7 +2926,7 @@ sub _remove_donation_artifacts {
 }
 
 sub _donation_static_card {
-    my ($campaign) = @_;
+    my ($db, $campaign) = @_;
     my $slug = escape_html($campaign->{slug} || '');
     my $title = escape_html($campaign->{title} || 'Campaign');
     my $summary = escape_html($campaign->{summary} || '');
@@ -2932,10 +2939,15 @@ sub _donation_static_card {
     my $meter = $goal > 0 && $campaign->{show_goal}
         ? qq{<div class="donation-meter" aria-hidden="true"><span style="width: $pct%"></span></div>}
         : '';
-    my $image = escape_html($campaign->{image_path} || '');
-    my $image_html = length $image
-        ? qq{<span class="donation-card-media"><img src="$image" alt="" loading="lazy"></span>}
-        : qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
+    my $image = $campaign->{image_path} || '';
+    my $image_html;
+    if (DesertCMS::Media::is_public_image_path($image)) {
+        my $asset = _media_asset_for_path($db, $image);
+        my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 360px');
+        $image_html = qq{<span class="donation-card-media">$img</span>};
+    } else {
+        $image_html = qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
+    }
     return <<"HTML";
 <a class="donation-card" href="/donate/$slug/">
   $image_html

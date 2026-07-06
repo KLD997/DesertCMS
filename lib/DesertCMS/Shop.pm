@@ -8,6 +8,7 @@ use MIME::Base64 qw(encode_base64);
 use DesertCMS::Commerce;
 use DesertCMS::Config;
 use DesertCMS::DB;
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(
@@ -80,7 +81,7 @@ sub admin_media_rows {
             FROM media_assets m
             LEFT JOIN shop_listings l ON l.media_asset_id = m.id
             WHERE m.deleted_at IS NULL
-              AND m.public_path LIKE '/assets/media/%.jpg'
+              AND m.public_path LIKE '/assets/media/%'
             ORDER BY m.created_at DESC, m.id DESC
         },
         { Slice => {} }
@@ -155,7 +156,7 @@ sub catalog_items {
             FROM shop_listings l
             JOIN media_assets m ON m.id = l.media_asset_id
             WHERE m.deleted_at IS NULL
-              AND m.public_path LIKE '/assets/media/%.jpg'
+              AND m.public_path LIKE '/assets/media/%'
               AND l.active = 1
             ORDER BY l.updated_at DESC, l.id DESC
         },
@@ -180,7 +181,7 @@ sub listing {
             JOIN media_assets m ON m.id = l.media_asset_id
             WHERE l.id = ?
               AND m.deleted_at IS NULL
-              AND m.public_path LIKE '/assets/media/%.jpg'
+              AND m.public_path LIKE '/assets/media/%'
         },
         undef,
         int($id)
@@ -198,7 +199,7 @@ sub save_listing {
         $media_asset_id
     ) or die "media asset not found";
     die "shop listings require an image asset with a public optimized derivative"
-        unless ($asset->{public_path} || '') =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        unless DesertCMS::Media::is_public_image_path($asset->{public_path} || '');
 
     my $existing = $self->{db}->dbh->selectrow_hashref(
         'SELECT * FROM shop_listings WHERE media_asset_id = ?',

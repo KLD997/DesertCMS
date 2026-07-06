@@ -10,6 +10,7 @@ use DesertCMS::Config;
 use DesertCMS::DB;
 use DesertCMS::Email qw(send_postmark);
 use DesertCMS::HTTP ();
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(
@@ -1020,7 +1021,7 @@ sub _email_optional {
 sub _image_path {
     my ($value) = @_;
     $value = _text($value, 300);
-    return $value if $value =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $value if DesertCMS::Media::is_public_image_path($value);
     return '';
 }
 

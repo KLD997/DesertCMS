@@ -3,6 +3,7 @@ package DesertCMS::Content;
 use strict;
 use warnings;
 use JSON::PP qw(encode_json decode_json);
+use DesertCMS::Media;
 use DesertCMS::Renderer;
 use DesertCMS::RichText qw(sanitize_rich_html plain_text_from_rich_html);
 use DesertCMS::Settings;
@@ -87,7 +88,7 @@ sub save {
     my $meta_description = _trim($args{meta_description});
     my $canonical_url = _trim($args{canonical_url});
     my $feature_image_path = _trim($args{feature_image_path});
-    $feature_image_path = '' unless $feature_image_path =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    $feature_image_path = '' unless DesertCMS::Media::is_public_image_path($feature_image_path);
     my $location_enabled = $args{location_enabled} ? 1 : 0;
     my $location_lat = _coordinate($args{location_lat}, -90, 90);
     my $location_lng = _coordinate($args{location_lng}, -180, 180);
@@ -615,7 +616,7 @@ sub _normalize_body_json {
                 };
             } elsif ($type eq 'image') {
                 my $src = defined $block->{src} ? "$block->{src}" : '';
-                next unless $src eq '' || $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+                next unless $src eq '' || DesertCMS::Media::is_public_image_path($src);
                 my $layout = defined $block->{layout} ? "$block->{layout}" : 'full';
                 my $size = defined $block->{size} ? "$block->{size}" : 'large';
                 $layout = 'full' unless $layout =~ /\A(?:full|left|right|center)\z/;
@@ -631,7 +632,7 @@ sub _normalize_body_json {
                 };
             } elsif ($type eq 'image_text') {
                 my $src = defined $block->{src} ? "$block->{src}" : '';
-                next unless $src eq '' || $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+                next unless $src eq '' || DesertCMS::Media::is_public_image_path($src);
                 my $image_side = defined $block->{image_side} ? "$block->{image_side}" : 'left';
                 $image_side = 'left' unless $image_side =~ /\A(?:left|right)\z/;
                 my ($text, $html) = _normalize_rich_text_block($block);

@@ -5,6 +5,7 @@ use warnings;
 use JSON::PP qw(encode_json decode_json);
 use DesertCMS::Config;
 use DesertCMS::DB;
+use DesertCMS::Media;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(now);
 
@@ -273,7 +274,7 @@ sub _site_media_items {
                        owner_site_id, owner_domain, owner_display_name, created_at
                 FROM media_assets
                 WHERE deleted_at IS NULL
-                  AND public_path LIKE '/assets/media/%.jpg'
+                  AND public_path LIKE '/assets/media/%'
                 ORDER BY created_at DESC, id DESC
                 LIMIT 250
             },
@@ -284,7 +285,7 @@ sub _site_media_items {
     $rows ||= [];
     my @items;
     for my $row (@{$rows}) {
-        next unless ($row->{public_path} || '') =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        next unless DesertCMS::Media::is_public_image_path($row->{public_path});
         my $image_url = 'https://' . $site->{domain} . $row->{public_path};
         push @items, {
             source_site_id    => $site->{site_id},

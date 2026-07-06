@@ -67,6 +67,7 @@ sub install_default {
         _ensure_events_css($dest);
         _ensure_public_event_ticket_wrap_css($dest);
         _ensure_donations_css($dest);
+        _ensure_donation_media_fit_css($dest);
         _ensure_membership_css($dest);
         return 1;
     }
@@ -106,6 +107,7 @@ sub install_default {
     _ensure_events_css($dest);
     _ensure_public_event_ticket_wrap_css($dest);
     _ensure_donations_css($dest);
+    _ensure_donation_media_fit_css($dest);
     _ensure_membership_css($dest);
     return 1;
 }
@@ -842,6 +844,25 @@ main:has(.donations-page) { width: min(1180px, calc(100% - 32px)); }
   .donation-primary-link,
   .donation-return-link { width: 100%; }
 }
+CSS
+    close $fh;
+}
+
+sub _ensure_donation_media_fit_css {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'assets', 'site.css');
+    return unless -f $path;
+    my $body = _read_file($path);
+    return if $body =~ /DesertCMS component upgrade: public donation media fit/;
+
+    open my $fh, '>>', $path or die "cannot update theme donation media css $path: $!";
+    print {$fh} <<'CSS';
+
+/* DesertCMS component upgrade: public donation media fit. */
+.donation-card-media { padding: clamp(10px, 2vw, 18px); background: transparent; }
+.donation-card-media img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
+.donation-detail-media { display: grid; place-items: center; padding: clamp(12px, 2.4vw, 24px); background: transparent; }
+.donation-detail-media img { width: 100%; height: auto; max-height: min(520px, 70vh); min-height: 0; aspect-ratio: auto; object-fit: contain; object-position: center; }
 CSS
     close $fh;
 }

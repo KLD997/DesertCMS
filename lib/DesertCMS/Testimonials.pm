@@ -2,6 +2,7 @@ package DesertCMS::Testimonials;
 
 use strict;
 use warnings;
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(hmac_sha256_hex now slugify);
@@ -368,7 +369,7 @@ sub _email_optional {
 sub _image_path {
     my ($value) = @_;
     $value = _text($value, 300);
-    return $value if $value =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $value if DesertCMS::Media::is_public_image_path($value);
     return '';
 }
 

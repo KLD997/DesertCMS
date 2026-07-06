@@ -5529,7 +5529,7 @@ sub _builder_media_json {
                 search_text => DesertCMS::Media::media_search_text($_),
             }
         } grep {
-            ($_->{public_path} || '') =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z}
+            DesertCMS::Media::is_public_image_path($_->{public_path} || '')
         } @{ $media_assets || [] }
     ]);
 }
@@ -5981,8 +5981,8 @@ HTML
     my $toolbar = _builder_toolbar_html();
     my $feature_options = '<option value="">No feature image</option>';
     for my $asset (@{$media_assets}) {
+        next unless DesertCMS::Media::is_public_image_path($asset->{public_path} || '');
         my $path = escape_html($asset->{public_path} || '');
-        next unless $path =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
         my $name = escape_html($asset->{original_name} || $asset->{public_path});
         my $selected = ($asset->{public_path} || '') eq $feature_image_path ? 'selected' : '';
         $feature_options .= qq{<option value="$path" $selected>$name</option>};
@@ -8195,7 +8195,7 @@ sub _directory_feature_image_options {
             SELECT original_name, public_path
             FROM media_assets
             WHERE deleted_at IS NULL
-              AND public_path LIKE '/assets/media/%.jpg'
+              AND public_path LIKE '/assets/media/%'
             ORDER BY created_at DESC, id DESC
             LIMIT 200
         },
@@ -8203,6 +8203,7 @@ sub _directory_feature_image_options {
     );
     my $html = '<option value="">No image</option>';
     for my $row (@{$rows}) {
+        next unless DesertCMS::Media::is_public_image_path($row->{public_path} || '');
         my $path = escape_html($row->{public_path} || '');
         my $name = escape_html($row->{original_name} || $row->{public_path} || 'Image');
         my $is_selected = ($row->{public_path} || '') eq ($selected || '') ? 'selected' : '';
@@ -9497,7 +9498,7 @@ sub _event_feature_image_options {
             SELECT original_name, public_path
             FROM media_assets
             WHERE deleted_at IS NULL
-              AND public_path LIKE '/assets/media/%.jpg'
+              AND public_path LIKE '/assets/media/%'
             ORDER BY created_at DESC, id DESC
             LIMIT 200
         },
@@ -9505,6 +9506,7 @@ sub _event_feature_image_options {
     );
     my $html = '<option value="">No feature image</option>';
     for my $row (@{$rows}) {
+        next unless DesertCMS::Media::is_public_image_path($row->{public_path} || '');
         my $path = escape_html($row->{public_path} || '');
         my $name = escape_html($row->{original_name} || $row->{public_path} || 'Image');
         my $is_selected = ($row->{public_path} || '') eq ($selected || '') ? 'selected' : '';
@@ -9884,14 +9886,14 @@ sub _content_reference_json {
 sub _admin_content_card_image {
     my ($item) = @_;
     my $feature = $item->{feature_image_path} || '';
-    return $feature if $feature =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $feature if DesertCMS::Media::is_public_image_path($feature);
 
     my $blocks = eval { decode_json($item->{body_json} || '[]') } || [];
     for my $block (@{$blocks}) {
         next unless ref $block eq 'HASH';
         next unless ($block->{type} || '') eq 'image' || ($block->{type} || '') eq 'image_text';
         my $src = $block->{src} || '';
-        return $src if $src =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        return $src if DesertCMS::Media::is_public_image_path($src);
     }
     return '';
 }
@@ -15240,7 +15242,7 @@ sub _module_showcase_settings_page {
             FROM media_assets
             WHERE deleted_at IS NULL
               AND (
-                    public_path LIKE '/assets/media/%.jpg'
+                    public_path LIKE '/assets/media/%'
                  OR public_path LIKE '/assets/resources/%'
               )
         }
@@ -16222,8 +16224,10 @@ sub _donation_detail {
     my $title = escape_html($campaign->{title} || 'Donation campaign');
     my $summary = escape_html($campaign->{summary} || '');
     my $body_text = DesertCMS::Donations::campaign_body_html($campaign->{body} || $campaign->{summary} || '');
-    my $image = escape_html($campaign->{image_path} || '');
-    my $image_html = length $image ? qq{<figure class="donation-detail-media"><img src="$image" alt=""></figure>} : '';
+    my $image = $campaign->{image_path} || '';
+    my $image_html = DesertCMS::Media::is_public_image_path($image)
+        ? qq{<figure class="donation-detail-media">} . $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager') . qq{</figure>}
+        : '';
     my $progress = $self->_donation_progress_html($campaign);
     my $form = $self->_donation_form_html($campaign);
     my $notice = $message ? '<p class="' . ($is_error ? 'notice error' : 'notice') . '">' . escape_html($message) . '</p>' : '';
@@ -16354,9 +16358,9 @@ sub _donation_campaign_card {
     my $meter = $goal > 0 && $campaign->{show_goal}
         ? qq{<div class="donation-meter" aria-hidden="true"><span style="width: $pct%"></span></div>}
         : '';
-    my $image = escape_html($campaign->{image_path} || '');
-    my $image_html = length $image
-        ? qq{<span class="donation-card-media"><img src="$image" alt="" loading="lazy"></span>}
+    my $image = $campaign->{image_path} || '';
+    my $image_html = DesertCMS::Media::is_public_image_path($image)
+        ? qq{<span class="donation-card-media">} . $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 360px') . qq{</span>}
         : qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
     return <<"HTML";
 <a class="donation-card" href="/donate/$slug/">
@@ -16373,6 +16377,57 @@ sub _donation_campaign_card {
   </div>
 </a>
 HTML
+}
+
+sub _public_media_img_tag {
+    my ($self, $src, $alt, %opts) = @_;
+    return '' unless DesertCMS::Media::is_public_image_path($src);
+    my $asset = $self->{db}->dbh->selectrow_hashref(
+        q{
+            SELECT public_path, alt_text, seo_title, seo_description, width, height, derivatives_json
+            FROM media_assets
+            WHERE deleted_at IS NULL
+              AND public_path = ?
+            LIMIT 1
+        },
+        undef,
+        $src
+    ) || {};
+    $alt = $asset->{alt_text} || '' unless defined $alt && length $alt;
+    my @attrs = (
+        'src="' . escape_html($src) . '"',
+        'alt="' . escape_html($alt) . '"',
+        'loading="' . escape_html($opts{loading} || 'lazy') . '"',
+        'decoding="async"',
+    );
+    if (int($asset->{width} || 0) > 0 && int($asset->{height} || 0) > 0) {
+        push @attrs, 'width="' . int($asset->{width}) . '"';
+        push @attrs, 'height="' . int($asset->{height}) . '"';
+    }
+    my $srcset = _public_media_srcset($asset);
+    if (length $srcset) {
+        push @attrs, 'srcset="' . escape_html($srcset) . '"';
+        push @attrs, 'sizes="' . escape_html($opts{sizes} || '(max-width: 760px) 100vw, 1120px') . '"';
+    }
+    return '<img ' . join(' ', @attrs) . '>';
+}
+
+sub _public_media_srcset {
+    my ($asset) = @_;
+    return '' unless $asset && defined $asset->{derivatives_json} && length $asset->{derivatives_json};
+    my $derivatives = eval { decode_json($asset->{derivatives_json}) } || {};
+    my $sizes = ref $derivatives->{sizes} eq 'ARRAY' ? $derivatives->{sizes} : [];
+    my %seen;
+    my @entries;
+    for my $size (sort { int($a->{width} || 0) <=> int($b->{width} || 0) } grep { ref $_ eq 'HASH' } @{$sizes}) {
+        my $path = $size->{path} || '';
+        my $width = int($size->{width} || 0);
+        next unless DesertCMS::Media::is_public_image_variant_path($path);
+        next unless $width > 0;
+        next if $seen{$width}++;
+        push @entries, "$path ${width}w";
+    }
+    return @entries > 1 ? join(', ', @entries) : '';
 }
 
 sub _donation_progress_html {

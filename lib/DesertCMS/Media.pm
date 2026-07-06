@@ -60,10 +60,20 @@ sub public_derivative_kind {
     return asset_kind($asset) eq 'image' ? 'optimized_image' : 'public_derivative';
 }
 
+sub is_public_image_path {
+    my ($path) = @_;
+    return defined $path && $path =~ m{\A/assets/media/[0-9a-f]{64}\.(?:jpg|png|webp)\z} ? 1 : 0;
+}
+
+sub is_public_image_variant_path {
+    my ($path) = @_;
+    return defined $path && $path =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.(?:jpg|png|webp)\z} ? 1 : 0;
+}
+
 sub public_policy {
     my ($asset) = @_;
     return 'optimized_public_derivative' if ref $asset eq 'HASH'
-        && ($asset->{public_path} || '') =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+        && is_public_image_path($asset->{public_path} || '');
     return 'public_resource_download' if ref $asset eq 'HASH'
         && ($asset->{public_path} || '') =~ m{\A/assets/resources/[0-9a-f]{64}\.[a-z0-9]+\z};
     return 'private_source_only';
@@ -229,13 +239,15 @@ sub store_upload {
     my $asset_kind = asset_kind($mime_type);
     my ($public_rel, $width, $height, $derivatives);
     if ($asset_kind eq 'image') {
-        $public_rel = "/assets/media/$checksum.jpg";
-        my $public_path = File::Spec->catfile($self->{config}->get('public_root'), 'assets', 'media', "$checksum.jpg");
+        my $public_ext = _public_image_extension($mime_type);
+        $public_rel = "/assets/media/$checksum.$public_ext";
+        my $public_path = File::Spec->catfile($self->{config}->get('public_root'), 'assets', 'media', "$checksum.$public_ext");
         $self->_create_derivative($storage_path, $public_path, max_width => $self->_public_max_width);
         ($width, $height) = $self->_identify($public_path);
         $derivatives = $self->_create_responsive_derivatives(
             $storage_path,
             $checksum,
+            $public_ext,
             $public_rel,
             $width,
             $height,
@@ -680,7 +692,7 @@ sub asset_quality {
     my $sizes = ref $derivatives->{sizes} eq 'ARRAY' ? $derivatives->{sizes} : [];
     my $responsive_count = scalar grep {
         ref $_ eq 'HASH'
-            && ($_->{path} || '') =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.jpg\z}
+            && is_public_image_variant_path($_->{path} || '')
             && int($_->{width} || 0) > 0
             && int($_->{height} || 0) > 0
     } @{$sizes};
@@ -838,7 +850,7 @@ sub lifecycle_audit {
         }
         if (asset_kind($asset) eq 'image') {
             for my $rel (_public_derivative_paths($asset)) {
-                next unless $rel =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.jpg\z};
+                next unless is_public_image_variant_path($rel);
                 $active_public_path{$rel} = $id;
             }
         }
@@ -874,7 +886,7 @@ sub lifecycle_audit {
 
     my @stale_derivatives;
     for my $file (@{ $self->_public_files('assets', 'media') }) {
-        next unless $file->{rel} =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.jpg\z};
+        next unless is_public_image_variant_path($file->{rel});
         next if $active_public_path{$file->{rel}};
         push @stale_derivatives, {
             %{$file},
@@ -1011,7 +1023,8 @@ sub _create_derivative {
 }
 
 sub _create_responsive_derivatives {
-    my ($self, $source, $checksum, $canonical_rel, $canonical_width, $canonical_height) = @_;
+    my ($self, $source, $checksum, $extension, $canonical_rel, $canonical_width, $canonical_height) = @_;
+    $extension = $extension && $extension =~ /\A(?:jpg|png|webp)\z/ ? $extension : 'jpg';
     my $max_width = $self->_public_max_width;
     my %seen;
     my @sizes;
@@ -1032,7 +1045,7 @@ sub _create_responsive_derivatives {
     for my $target (@RESPONSIVE_WIDTHS) {
         next if $target >= int($canonical_width || 0);
         next if $target > $max_width;
-        my $filename = "$checksum-$target.jpg";
+        my $filename = "$checksum-$target.$extension";
         my $rel = "/assets/media/$filename";
         my $dest = File::Spec->catfile($self->{config}->get('public_root'), 'assets', 'media', $filename);
         $self->_create_derivative($source, $dest, max_width => $target);
@@ -1069,6 +1082,13 @@ sub _public_quality {
     my $quality = int($self->{config}->get('image_public_quality') || 82);
     $quality = 82 if $quality < 1 || $quality > 100;
     return $quality;
+}
+
+sub _public_image_extension {
+    my ($mime_type) = @_;
+    $mime_type = lc($mime_type || '');
+    return 'png' if $mime_type eq 'image/png' || $mime_type eq 'image/webp';
+    return 'jpg';
 }
 
 sub _enforce_media_limits {
@@ -2237,7 +2257,7 @@ sub _clean_email {
 sub _unlink_public_derivative_if_unused {
     my ($self, $asset) = @_;
     my $public_path = $asset->{public_path} || '';
-    return unless $public_path =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return unless is_public_image_path($public_path);
 
     my ($remaining) = $self->{db}->dbh->selectrow_array(
         'SELECT COUNT(*) FROM media_assets WHERE deleted_at IS NULL AND public_path = ?',
@@ -2247,7 +2267,7 @@ sub _unlink_public_derivative_if_unused {
     return if $remaining;
 
     for my $rel (_public_derivative_paths($asset)) {
-        next unless $rel =~ m{\A/assets/media/[0-9a-f]{64}(?:-[0-9]+)?\.jpg\z};
+        next unless is_public_image_variant_path($rel);
         my $file = File::Spec->catfile($self->{config}->get('public_root'), split m{/}, substr($rel, 1));
         next unless _is_under($file, $self->{config}->get('public_root'));
         unlink $file if -f $file;

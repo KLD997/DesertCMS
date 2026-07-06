@@ -8,6 +8,7 @@ use MIME::Base64 qw(encode_base64);
 use DesertCMS::Commerce;
 use DesertCMS::Config;
 use DesertCMS::DB;
+use DesertCMS::Media;
 use DesertCMS::Modules;
 use DesertCMS::Settings;
 use DesertCMS::Util qw(
@@ -785,7 +786,7 @@ sub _body {
 sub _image_path {
     my ($value) = @_;
     $value = _text($value, 300);
-    return $value if $value =~ m{\A/assets/media/[0-9a-f]{64}\.jpg\z};
+    return $value if DesertCMS::Media::is_public_image_path($value);
     return '';
 }
 
