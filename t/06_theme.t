@@ -127,6 +127,9 @@ like($polished_css, qr/\.contributor-card-media\b/, 'legacy public CSS gains con
 like($polished_css, qr/\.site-footer-nav a\b/, 'legacy public CSS gains footer tap target rules');
 like($polished_css, qr/DesertCMS component upgrade: public donations v2/, 'legacy public CSS gains public donations layout rules');
 like($polished_css, qr/DesertCMS component upgrade: public donation media fit/, 'legacy public CSS gains non-cropping donation media rules');
+like($polished_css, qr/DesertCMS component upgrade: public donation media fit v2/, 'legacy public CSS gains bounded donation card media rules');
+like($polished_css, qr/\.donation-card-media \{[^}]*height:\s*clamp\(180px,\s*24vw,\s*240px\)[^}]*overflow:\s*hidden/s, 'legacy public CSS bounds donation card media height');
+like($polished_css, qr/\.donation-card-media img \{[^}]*max-width:\s*100%[^}]*max-height:\s*100%/s, 'legacy public CSS constrains donation card artwork inside the bounded frame');
 like($polished_css, qr/DesertCMS component upgrade: public module media fit/, 'legacy public CSS gains shared public module media rules');
 like($polished_css, qr/\.showcase-card--image \.public-media-img\b[\s\S]*?object-fit:\s*contain;/, 'legacy public CSS gains contained Showcase media rules');
 like($polished_css, qr/\.donation-amount-grid\b/, 'legacy public CSS gains styled donation amount choices');

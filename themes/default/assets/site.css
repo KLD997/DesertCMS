@@ -2620,8 +2620,8 @@ main:has(.donations-page) { width: min(1180px, calc(100% - 32px)); }
 .donation-card { min-width: 0; display: grid; grid-template-rows: auto 1fr; overflow: hidden; min-height: 360px; border: 1px solid var(--site-card-border, var(--line)); border-radius: 8px; background: var(--site-card-bg, var(--panel)); box-shadow: var(--site-card-shadow, none); color: var(--ink); text-decoration: none; }
 .donation-card:hover,
 .donation-card:focus-visible { border-color: var(--accent); box-shadow: 0 16px 36px rgba(16, 32, 51, 0.12); transform: translateY(-1px); }
-.donation-card-media { display: grid; place-items: center; min-height: 150px; aspect-ratio: 16 / 9; padding: clamp(10px, 2vw, 18px); border-bottom: 1px solid var(--site-card-border, var(--line)); background: transparent; color: var(--accent); }
-.donation-card-media img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+.donation-card-media { display: grid; place-items: center; min-height: 0; height: clamp(180px, 24vw, 240px); padding: clamp(12px, 2vw, 18px); overflow: hidden; border-bottom: 1px solid var(--site-card-border, var(--line)); background: transparent; color: var(--accent); }
+.donation-card-media img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; margin: 0 auto; object-fit: contain; object-position: center; }
 .donation-card-media--empty span { display: grid; place-items: center; width: 64px; height: 64px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: 900 15px/1 var(--site-ui-font, system-ui, sans-serif); }
 .donation-card-body { min-width: 0; display: grid; gap: 12px; align-content: start; padding: 18px; }
 .donation-card-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
@@ -2832,3 +2832,9 @@ main:has(.docs-index), main:has(.docs-page) { width: min(1120px, calc(100% - 32p
 .showcase-card--image .public-media-img { aspect-ratio: 4 / 3; object-fit: contain; object-position: center; background: transparent; }
 .directory-detail, .booking-detail { display: grid; gap: 24px; }
 .directory-detail-image.public-media-img { justify-self: start; width: min(100%, 820px); max-width: 100%; height: auto; max-height: min(520px, 70vh); object-fit: contain; object-position: center; background: transparent; }
+
+/* DesertCMS component upgrade: public donation media fit v2. */
+.donation-card-media { min-height: 0; height: clamp(180px, 24vw, 240px); padding: clamp(12px, 2vw, 18px); overflow: hidden; background: transparent; }
+.donation-card-media img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; margin: 0 auto; object-fit: contain; object-position: center; }
+.donation-detail-media { display: grid; place-items: center; padding: clamp(12px, 2.4vw, 24px); background: transparent; }
+.donation-detail-media img { width: 100%; height: auto; max-height: min(520px, 70vh); min-height: 0; aspect-ratio: auto; object-fit: contain; object-position: center; }

@@ -32,6 +32,8 @@ like($site_css, qr{DesertCMS component upgrade: public donations v2}, 'public Do
 like($site_css, qr{\.donation-priority \{ display: grid; grid-template-columns: minmax\(220px, 0\.52fr\) minmax\(0, 1\.48fr\);}, 'public Donations detail puts the donate section in stable top tracks');
 like($site_css, qr{\.donation-body-list \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\);}, 'public Donations campaign body lists wrap into readable tiles');
 like($site_css, qr{\.donation-amount-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 106px\), 1fr\)\);}, 'public Donations amount options wrap as buttons');
+like($site_css, qr/\.donation-card-media \{[\s\S]*?height: clamp\(180px, 24vw, 240px\);[\s\S]*?overflow: hidden;/, 'public Donations cards use a bounded media frame');
+like($site_css, qr/\.donation-card-media img \{[\s\S]*?max-width: 100%;[\s\S]*?max-height: 100%;[\s\S]*?object-fit: contain;/, 'public Donations card artwork scales inside the bounded frame');
 like($site_css, qr{DesertCMS component upgrade: public module media fit|\.public-media-img \{ display: block; width: 100%; background: transparent; \}}, 'public module media fit rules exist for shared image rendering');
 like($site_css, qr/\.event-card \.public-media-img,\s*\.shop-card \.public-media-img \{[\s\S]*?object-fit: contain;[\s\S]*?object-position: center;/, 'public module cards can contain transparent artwork without forced cropping');
 like($site_css, qr/\.showcase-card--image \.public-media-img \{[\s\S]*?object-fit: contain;[\s\S]*?background: transparent;/, 'public Showcase image cards contain transparent artwork cleanly');
