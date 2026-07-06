@@ -7,6 +7,7 @@ use File::Basename qw(basename dirname);
 use File::Spec;
 use JSON::PP qw(encode_json decode_json);
 use MIME::Base64 qw(encode_base64);
+use DesertCMS::Accounts;
 use DesertCMS::Analytics;
 use DesertCMS::Auth;
 use DesertCMS::Backup;
@@ -18,6 +19,7 @@ use DesertCMS::Commerce;
 use DesertCMS::Config;
 use DesertCMS::Content;
 use DesertCMS::ContributorRequests;
+use DesertCMS::Dashboard;
 use DesertCMS::DB;
 use DesertCMS::Directory;
 use DesertCMS::Donations;
@@ -37,29 +39,36 @@ use DesertCMS::FontPackages;
 use DesertCMS::Forms;
 use DesertCMS::GeoIP;
 use DesertCMS::Governance;
+use DesertCMS::Forums;
 use DesertCMS::HTTP;
+use DesertCMS::LiveStreaming;
 use DesertCMS::Media;
 use DesertCMS::Membership;
+use DesertCMS::ModuleManifest;
 use DesertCMS::Modules;
 use DesertCMS::Navigation;
 use DesertCMS::Newsletter;
+use DesertCMS::Notifications;
 use DesertCMS::Operations;
 use DesertCMS::Ratings;
 use DesertCMS::Redirects;
+use DesertCMS::Realtime;
 use DesertCMS::RichText ();
 use DesertCMS::Renderer;
 use DesertCMS::Security qw(security_headers apply_openbsd_sandbox);
+use DesertCMS::SecurityCenter;
 use DesertCMS::SEO;
 use DesertCMS::ServicePlans;
 use DesertCMS::Settings;
 use DesertCMS::Shop;
 use DesertCMS::SiteTheme;
 use DesertCMS::Sites;
+use DesertCMS::Social;
 use DesertCMS::Testimonials;
 use DesertCMS::TenantIsolation;
 use DesertCMS::Theme;
 use DesertCMS::Upgrade;
-use DesertCMS::Util qw(escape_html now random_hex sha256_hexstr slugify);
+use DesertCMS::Util qw(escape_html now random_hex sha256_hexstr slugify url_decode);
 use DesertCMS::Version;
 
 sub new {
@@ -86,6 +95,13 @@ sub new {
     my $comments = DesertCMS::Comments->new(config => $config, db => $db);
     my $ratings = DesertCMS::Ratings->new(config => $config, db => $db);
     my $operations = DesertCMS::Operations->new(config => $config, db => $db, sites => $sites);
+    my $notifications = DesertCMS::Notifications->new(config => $config, db => $db);
+    my $accounts = DesertCMS::Accounts->new(config => $config, db => $db);
+    my $forums = DesertCMS::Forums->new(config => $config, db => $db, notifications => $notifications);
+    my $social = DesertCMS::Social->new(config => $config, db => $db, notifications => $notifications);
+    my $live_streaming = DesertCMS::LiveStreaming->new(config => $config, db => $db, notifications => $notifications);
+    my $security_center = DesertCMS::SecurityCenter->new(config => $config, db => $db);
+    my $dashboard = DesertCMS::Dashboard->new(config => $config, db => $db);
 
     return bless {
         config   => $config,
@@ -110,6 +126,13 @@ sub new {
         comments => $comments,
         ratings  => $ratings,
         operations => $operations,
+        accounts => $accounts,
+        forums => $forums,
+        social => $social,
+        live_streaming => $live_streaming,
+        notifications => $notifications,
+        security_center => $security_center,
+        dashboard => $dashboard,
     }, $class;
 }
 
@@ -185,6 +208,18 @@ sub _dispatch {
     }
     if ($path eq '/members' || $path =~ m{^/members/}) {
         return $self->_dispatch_members($request);
+    }
+    if ($path eq '/account' || $path =~ m{^/account/}) {
+        return $self->_dispatch_accounts($request);
+    }
+    if ($path eq '/forums' || $path =~ m{^/forums/}) {
+        return $self->_dispatch_forums($request);
+    }
+    if ($path eq '/social' || $path =~ m{^/social/}) {
+        return $self->_dispatch_social($request);
+    }
+    if ($path eq '/live' || $path =~ m{^/live/}) {
+        return $self->_dispatch_live($request);
     }
     if ($path eq '/newsletter' || $path =~ m{^/newsletter/}) {
         return $self->_dispatch_newsletter($request);
@@ -268,6 +303,96 @@ sub _dispatch {
     if ($path eq '/admin/help') {
         return $self->_require_login($request, sub { $self->_help_page($request, @_) });
     }
+    if ($path eq '/admin/notifications') {
+        return $self->_require_login($request, sub { $self->_notifications_page($request, @_) });
+    }
+    if ($path eq '/admin/notifications/mark-read') {
+        return $self->_require_post($request, sub { $self->_notifications_mark_read($request, @_) });
+    }
+    if ($path eq '/admin/notifications/retry-due') {
+        return $self->_require_post($request, sub { $self->_notifications_retry_due($request, @_) });
+    }
+    if ($path eq '/admin/accounts') {
+        return $self->_require_login($request, sub { $self->_admin_accounts_page($request, @_) });
+    }
+    if ($path eq '/admin/accounts/create') {
+        return $self->_require_post($request, sub { $self->_admin_accounts_create($request, @_) });
+    }
+    if ($path eq '/admin/accounts/status') {
+        return $self->_require_post($request, sub { $self->_admin_accounts_status($request, @_) });
+    }
+    if ($path eq '/admin/accounts/groups/create') {
+        return $self->_require_post($request, sub { $self->_admin_account_group_create($request, @_) });
+    }
+    if ($path eq '/admin/forums') {
+        return $self->_require_login($request, sub { $self->_admin_forums_page($request, @_) });
+    }
+    if ($path eq '/admin/forums/categories/create') {
+        return $self->_require_post($request, sub { $self->_admin_forum_category_create($request, @_) });
+    }
+    if ($path eq '/admin/forums/categories/update') {
+        return $self->_require_post($request, sub { $self->_admin_forum_category_update($request, @_) });
+    }
+    if ($path eq '/admin/forums/topics/status') {
+        return $self->_require_post($request, sub { $self->_admin_forum_topic_status($request, @_) });
+    }
+    if ($path eq '/admin/forums/topics/pin') {
+        return $self->_require_post($request, sub { $self->_admin_forum_topic_pin($request, @_) });
+    }
+    if ($path eq '/admin/forums/posts/status') {
+        return $self->_require_post($request, sub { $self->_admin_forum_post_status($request, @_) });
+    }
+    if ($path eq '/admin/forums/reports/status') {
+        return $self->_require_post($request, sub { $self->_admin_forum_report_status($request, @_) });
+    }
+    if ($path eq '/admin/social') {
+        return $self->_require_login($request, sub { $self->_admin_social_page($request, @_) });
+    }
+    if ($path eq '/admin/social/posts/status') {
+        return $self->_require_post($request, sub { $self->_admin_social_post_status($request, @_) });
+    }
+    if ($path eq '/admin/social/replies/status') {
+        return $self->_require_post($request, sub { $self->_admin_social_reply_status($request, @_) });
+    }
+    if ($path eq '/admin/social/profiles/status') {
+        return $self->_require_post($request, sub { $self->_admin_social_profile_status($request, @_) });
+    }
+    if ($path eq '/admin/social/reports/status') {
+        return $self->_require_post($request, sub { $self->_admin_social_report_status($request, @_) });
+    }
+    if ($path eq '/admin/live') {
+        return $self->_require_login($request, sub { $self->_admin_live_page($request, @_) });
+    }
+    if ($path eq '/admin/live/channels/create') {
+        return $self->_require_post($request, sub { $self->_admin_live_channel_create($request, @_) });
+    }
+    if ($path eq '/admin/live/channels/key/rotate') {
+        return $self->_require_post($request, sub { $self->_admin_live_channel_key_rotate($request, @_) });
+    }
+    if ($path eq '/admin/live/channels/key/revoke') {
+        return $self->_require_post($request, sub { $self->_admin_live_channel_key_revoke($request, @_) });
+    }
+    if ($path eq '/admin/live/sessions/create') {
+        return $self->_require_post($request, sub { $self->_admin_live_session_create($request, @_) });
+    }
+    if ($path eq '/admin/live/sessions/status') {
+        return $self->_require_post($request, sub { $self->_admin_live_session_status($request, @_) });
+    }
+    if ($path eq '/admin/live/sessions/due') {
+        return $self->_require_post($request, sub { $self->_admin_live_sessions_due($request, @_) });
+    }
+    if ($path eq '/admin/live/chat/status') {
+        return $self->_require_post($request, sub { $self->_admin_live_chat_status($request, @_) });
+    }
+    if ($path eq '/admin/live/chat/reports/status') {
+        return $self->_require_post($request, sub { $self->_admin_live_chat_report_status($request, @_) });
+    }
+    if ($path eq '/admin/live/blocked-terms/save') {
+        return $self->_require_post($request, sub { $self->_admin_live_blocked_term_save($request, @_) });
+    }
+    if ($path eq '/admin/live/blocked-terms/delete') {
+        return $self->_require_post($request, sub { $self->_admin_live_blocked_term_delete($request, @_) });
+    }
     if ($path eq '/admin/pages') {
         return $self->_require_login($request, sub { $self->_content_list($request, @_, type => 'page') });
     }
@@ -275,10 +400,16 @@ sub _dispatch {
         return $self->_require_login($request, sub { $self->_content_form($request, @_, undef, 'page') });
     }
     if ($path eq '/admin/posts') {
-        return $self->_require_login($request, sub { $self->_content_list($request, @_, type => 'post') });
+        return $self->_require_login($request, sub {
+            return $self->_not_found unless $self->_posts_module_enabled;
+            return $self->_content_list($request, @_, type => 'post');
+        });
     }
     if ($path eq '/admin/posts/new') {
-        return $self->_require_login($request, sub { $self->_content_form($request, @_, undef, 'post') });
+        return $self->_require_login($request, sub {
+            return $self->_not_found unless $self->_posts_module_enabled;
+            return $self->_content_form($request, @_, undef, 'post');
+        });
     }
     if ($path eq '/admin/templates') {
         return $self->_require_login($request, sub { $self->_template_list($request, @_) });
@@ -485,6 +616,11 @@ sub _dispatch {
     if ($path eq '/admin/settings') {
         return $self->_require_login($request, sub { $self->_settings_page($request, @_) });
     }
+    if ($path eq '/admin/settings/dashboard') {
+        return $request->{method} eq 'POST'
+            ? $self->_require_post($request, sub { $self->_settings_dashboard_save($request, @_) })
+            : $self->_require_login($request, sub { $self->_settings_dashboard_page($request, @_) });
+    }
     if ($path eq '/admin/settings/master-control') {
         return $self->_require_login($request, sub { $self->_settings_master_control_page($request, @_) });
     }
@@ -567,11 +703,32 @@ sub _dispatch {
     if ($path eq '/admin/settings/sites') {
         return $self->_require_login($request, sub { $self->_settings_sites_page($request, @_) });
     }
+    if ($path eq '/admin/settings/security') {
+        return $self->_require_login($request, sub { $self->_security_center_page($request, @_) });
+    }
+    if ($path eq '/admin/settings/security/queue') {
+        return $self->_require_post($request, sub { $self->_security_center_queue($request, @_) });
+    }
+    if ($path eq '/admin/settings/realtime') {
+        return $request->{method} eq 'POST'
+            ? $self->_require_post($request, sub { $self->_settings_realtime_save($request, @_) })
+            : $self->_require_login($request, sub { $self->_settings_realtime_page($request, @_) });
+    }
     if ($path eq '/admin/settings/modules') {
         return $self->_require_login($request, sub { $self->_settings_modules_page($request, @_) });
     }
     if ($path eq '/admin/settings/modules/save') {
         return $self->_require_post($request, sub { $self->_settings_modules_save($request, @_) });
+    }
+    if ($path =~ m{\A/admin/settings/modules/(posts|accounts|live-streaming|forums|social|notifications|security-center)\z}) {
+        my $key = $1;
+        $key =~ s/-/_/g;
+        return $self->_require_login($request, sub { $self->_v3_module_settings_page($request, @_, $key) });
+    }
+    if ($path =~ m{\A/admin/settings/modules/(posts|accounts|live-streaming|forums|social|notifications|security-center)/save\z}) {
+        my $key = $1;
+        $key =~ s/-/_/g;
+        return $self->_require_post($request, sub { $self->_v3_module_settings_save($request, @_, $key) });
     }
     if ($path eq '/admin/settings/modules/map') {
         return $self->_require_login($request, sub { $self->_module_map_settings_page($request, @_) });
@@ -3602,10 +3759,14 @@ sub _dashboard {
 
     my $csrf = $self->{auth}->csrf_token($session_token);
     my $username = escape_html($session->{username});
-    my $analytics = DesertCMS::Analytics::summary($self->{config}, $self->{db}, days => 30, limit => 6);
+    my $days = _dashboard_days($request->param('range') || $request->param('days'));
+    my $view = _dashboard_view($request->param('view'));
+    my $analytics = DesertCMS::Analytics::summary($self->{config}, $self->{db}, days => $days, daily_days => ($days > 30 ? 30 : $days), limit => 8);
     my $health = $self->_dashboard_health($analytics);
     my $dashboard_alerts = _dashboard_alerts($health, $analytics);
-    my $daily_chart = _trend_chart($analytics->{daily}, 'No visits in the last 7 days.');
+    my $daily_chart = $view eq 'table'
+        ? _dashboard_daily_table($analytics->{daily})
+        : _trend_chart($analytics->{daily}, 'No visits in this range.');
     my $popular_chart = _rank_chart(
         $analytics->{top_pages},
         sub { $_[0]->{path} || '/' },
@@ -3613,6 +3774,9 @@ sub _dashboard {
         'No public visits have been recorded yet.',
         sub { int($_[0]->{unique_ips} || 0) . ' unique IPs' },
     );
+    if ($view eq 'table') {
+        $popular_chart = _dashboard_page_table($analytics->{top_pages});
+    }
     my $location_donut = _donut_chart($analytics->{locations}, 'country', 'visits', 'No visitor locations have been recorded yet.');
     my $city_locations = _table_rows($analytics->{city_locations}, [
         { label => 'Place',  value => 'location_label' },
@@ -3644,10 +3808,16 @@ sub _dashboard {
         'Resolved visitor locations'
     );
     my $metrics = join '',
-        _metric_card('Visits, 30 days', $analytics->{visits}, "$analytics->{unique_ips} unique IPs", $analytics->{visits} ? 'ok' : 'neutral'),
+        _metric_card("Visits, $days days", $analytics->{visits}, "$analytics->{unique_ips} unique IPs", $analytics->{visits} ? 'ok' : 'neutral'),
         _metric_card('Visits, 24 hours', $analytics->{visits_24h}, "$analytics->{unique_ips_24h} unique IPs", $analytics->{visits_24h} ? 'ok' : 'neutral'),
         _metric_card('Geo coverage', $health->{geo_coverage_percent} . '%', "$analytics->{geo_unknown_visits} unresolved visits", ($analytics->{visits} && $analytics->{geo_unknown_visits}) ? 'warn' : ($analytics->{visits} ? 'ok' : 'neutral')),
         _metric_card('Published items', $health->{published_items}, "$health->{draft_items} drafts", $health->{published_items} ? 'ok' : 'neutral');
+    my $post_action = $self->_posts_module_enabled
+        ? '<a class="button-link secondary" href="/admin/posts/new">New post</a>'
+        : '';
+    my $analytics_controls = _dashboard_analytics_controls($days, $view);
+    my $dashboard_widgets = $self->_dashboard_widget_grid($session, $analytics);
+    my $daily_days = int($analytics->{daily_days} || 7);
 
     my $body = <<"HTML";
 <section class="dashboard">
@@ -3656,10 +3826,11 @@ sub _dashboard {
       <p class="eyebrow">Signed in as $username</p>
       <h1>Analytics</h1>
       <p>Traffic, visitor locations, publishing status, and operational health.</p>
+      $analytics_controls
     </div>
     <div class="actions">
       <a class="button-link" href="/admin/pages/new">New page</a>
-      <a class="button-link secondary" href="/admin/posts/new">New post</a>
+      $post_action
       <a class="button-link secondary" href="/admin/editor">Editor</a>
       <form method="post" action="/admin/rebuild">
         <input type="hidden" name="csrf_token" value="$csrf">
@@ -3667,6 +3838,8 @@ sub _dashboard {
       </form>
     </div>
   </div>
+
+  $dashboard_widgets
 
   <section class="dashboard-health-strip" aria-label="Site health">
     <div class="dashboard-health-title">
@@ -3695,8 +3868,8 @@ sub _dashboard {
     <section class="panel dashboard-card dashboard-card--full dashboard-card--tall">
       <div class="panel-heading">
         <div>
-          <h2>Last 7 Days</h2>
-          <p>Daily visits and unique IPs.</p>
+              <h2>Daily Trend</h2>
+              <p>Daily visits and unique IPs across the last $daily_days day(s).</p>
         </div>
       </div>
       $daily_chart
@@ -3827,10 +4000,12 @@ sub _contributor_dashboard {
     my $site_identity = length $site_domain ? "$site_domain" : $site_url;
     $site_identity = escape_html($site_identity || 'Local contributor site');
     my $safe_csrf = escape_html($csrf);
+    my $posts_enabled = $self->_posts_module_enabled;
     my $dashboard_actions = '';
     if (_has_capability($self->{config}, $session, 'edit_content')) {
         $dashboard_actions .= qq{<a class="button-link" href="/admin/pages/new">New page</a>};
-        $dashboard_actions .= qq{<a class="button-link secondary" href="/admin/posts/new">New post</a>};
+        $dashboard_actions .= qq{<a class="button-link secondary" href="/admin/posts/new">New post</a>}
+            if $posts_enabled;
         $dashboard_actions .= <<"HTML";
       <form method="post" action="/admin/rebuild">
         <input type="hidden" name="csrf_token" value="$safe_csrf">
@@ -3842,13 +4017,19 @@ HTML
         $dashboard_actions .= qq{<a class="button-link secondary" href="/admin/media">Upload media</a>};
     }
     $dashboard_actions = length $dashboard_actions ? qq{<div class="actions">$dashboard_actions</div>} : '';
+    my @quick_card_defs = (
+        { href => '/admin/pages',                        eyebrow => 'Pages',  title => "$page_count pages",     body => 'Edit site structure and landing pages.',                           detail => 'Open Pages',     capability => 'view_content' },
+        { href => '/admin/media',                        eyebrow => 'Media',  title => "$media_count assets",   body => 'Upload private sources and use optimized public derivatives.',     detail => "$media_label stored", capability => 'view_media' },
+        { href => '/admin/site-settings?section=theme',  eyebrow => 'Design', title => 'Theme',                 body => 'Adjust public layout, typography, colors, and SEO basics.',       detail => 'Open Design',    capability => 'view_design' },
+    );
+    splice @quick_card_defs, 1, 0, {
+        href => '/admin/posts', eyebrow => 'Posts', title => "$post_count posts",
+        body => 'Publish dated updates and articles.', detail => 'Open Posts', capability => 'view_content'
+    } if $posts_enabled;
     my $quick_cards = _capability_link_cards(
         $self->{config},
         $session,
-        { href => '/admin/pages',                        eyebrow => 'Pages',  title => "$page_count pages",     body => 'Edit site structure and landing pages.',                           detail => 'Open Pages',     capability => 'view_content' },
-        { href => '/admin/posts',                        eyebrow => 'Posts',  title => "$post_count posts",     body => 'Publish dated updates and articles.',                            detail => 'Open Posts',     capability => 'view_content' },
-        { href => '/admin/media',                        eyebrow => 'Media',  title => "$media_count assets",   body => 'Upload private sources and use optimized public derivatives.',     detail => "$media_label stored", capability => 'view_media' },
-        { href => '/admin/site-settings?section=theme',  eyebrow => 'Design', title => 'Theme',                 body => 'Adjust public layout, typography, colors, and SEO basics.',       detail => 'Open Design',    capability => 'view_design' },
+        @quick_card_defs,
     );
     my $billing_link = $can_view_usage
         ? '<a class="button-link secondary" href="/admin/billing">Open Billing</a>'
@@ -4293,6 +4474,154 @@ sub _dashboard_empty {
     return '<div class="dashboard-empty" role="status"><span class="dashboard-empty-mark"></span><strong>Waiting for data</strong><small>' . escape_html($message || 'Activity will appear here after the site receives traffic.') . '</small></div>';
 }
 
+sub _dashboard_days {
+    my ($value) = @_;
+    $value = lc($value || '30');
+    return 1 if $value eq '24h';
+    return 7 if $value eq '7d';
+    return 30 if $value eq '30d';
+    return 90 if $value eq '90d';
+    return 365 if $value eq '365d';
+    my $days = int($value || 30);
+    return 7 if $days == 7;
+    return 30 if $days == 30;
+    return 90 if $days == 90;
+    return 365 if $days == 365;
+    return 30;
+}
+
+sub _dashboard_view {
+    my ($value) = @_;
+    return _clean_choice(lc($value || ''), 'chart', qw(chart table));
+}
+
+sub _dashboard_analytics_controls {
+    my ($days, $view) = @_;
+    my @ranges = (
+        [ 1,   '24h' ],
+        [ 7,   '7d' ],
+        [ 30,  '30d' ],
+        [ 90,  '90d' ],
+        [ 365, '365d' ],
+    );
+    my $range_links = '';
+    for my $range (@ranges) {
+        my ($value, $label) = @{$range};
+        my $class = $value == $days ? ' class="active" aria-current="page"' : '';
+        my $safe_view = escape_html($view);
+        $range_links .= qq{<a href="/admin?range=$value&view=$safe_view"$class>$label</a>};
+    }
+    my $chart_class = $view eq 'chart' ? ' class="active" aria-current="page"' : '';
+    my $table_class = $view eq 'table' ? ' class="active" aria-current="page"' : '';
+    return <<"HTML";
+<div class="dashboard-controls" aria-label="Analytics controls">
+  <nav aria-label="Time range">$range_links</nav>
+  <nav aria-label="Graph view">
+    <a href="/admin?range=$days&view=chart"$chart_class>Charts</a>
+    <a href="/admin?range=$days&view=table"$table_class>Tables</a>
+  </nav>
+</div>
+HTML
+}
+
+sub _dashboard_daily_table {
+    my ($rows) = @_;
+    my $body = _table_rows($rows || [], [
+        { label => 'Day', value => 'day' },
+        { label => 'Visits', value => 'visits' },
+        { label => 'Unique IPs', value => 'unique_ips' },
+    ], 'No daily analytics yet.');
+    return qq{<div class="dashboard-table-wrap"><table class="content-table compact-table dashboard-table"><thead><tr><th>Day</th><th>Visits</th><th>Unique IPs</th></tr></thead><tbody>$body</tbody></table></div>};
+}
+
+sub _dashboard_page_table {
+    my ($rows) = @_;
+    my $body = _table_rows($rows || [], [
+        { label => 'Path', value => 'path' },
+        { label => 'Visits', value => 'visits' },
+        { label => 'Unique IPs', value => 'unique_ips' },
+    ], 'No page analytics yet.');
+    return qq{<div class="dashboard-table-wrap"><table class="content-table compact-table dashboard-table"><thead><tr><th>Path</th><th>Visits</th><th>Unique IPs</th></tr></thead><tbody>$body</tbody></table></div>};
+}
+
+sub _dashboard_widget_grid {
+    my ($self, $session, $analytics) = @_;
+    my $widgets = $self->{dashboard}->widgets_for_user(
+        user_id => $session ? $session->{user_id} : 0,
+        role    => $session ? ($session->{role} || 'owner') : 'owner',
+    );
+    my $html = '';
+    for my $widget (@{$widgets}) {
+        next unless $widget->{enabled};
+        next if ($widget->{capability} || '') && !_has_capability($self->{config}, $session, $widget->{capability});
+        $html .= $self->_dashboard_widget_card($widget, $analytics);
+    }
+    return '' unless length $html;
+    return qq{<section class="dashboard-widget-grid" aria-label="Custom dashboard widgets">$html</section>};
+}
+
+sub _dashboard_widget_card {
+    my ($self, $widget, $analytics) = @_;
+    my $key = $widget->{key} || '';
+    my $label = escape_html($widget->{label} || $key);
+    my $size = _dashboard_widget_size_class($widget->{size});
+    my ($value, $detail, $href) = ('', '', '/admin/settings/dashboard');
+    if ($key eq 'analytics_overview') {
+        $value = int(($analytics || {})->{visits} || 0) . ' visits';
+        $detail = int(($analytics || {})->{unique_ips} || 0) . ' unique IPs in ' . int(($analytics || {})->{days} || 30) . ' day(s)';
+        $href = '/admin';
+    } elsif ($key eq 'top_pages') {
+        my $top = (($analytics || {})->{top_pages} || [])->[0] || {};
+        $value = $top->{path} || 'No page visits';
+        $detail = int($top->{visits} || 0) . ' visits';
+        $href = '/admin?view=table';
+    } elsif ($key eq 'top_ips') {
+        my $top = (($analytics || {})->{top_ips} || [])->[0] || {};
+        $value = $top->{ip_label} || 'No IP activity';
+        $detail = int($top->{visits} || 0) . ' visits across ' . int($top->{pages} || 0) . ' page(s)';
+        $href = '/admin?view=table';
+    } elsif ($key eq 'security_summary') {
+        my $checks = $self->{security_center}->run_checks;
+        my $critical = grep { ($_->{status} || '') eq 'critical' } @{$checks};
+        my $warning = grep { ($_->{status} || '') eq 'warning' } @{$checks};
+        $value = int($critical) . ' critical';
+        $detail = int($warning) . ' warning(s), read-only checks';
+        $href = '/admin/settings/security';
+    } elsif ($key eq 'notifications') {
+        $value = $self->{notifications}->unread_count(audience => 'admin') . ' unread';
+        $detail = 'Admin and module event inbox';
+        $href = '/admin/notifications';
+    } elsif ($key eq 'module_status') {
+        my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+        my @modules = @{ DesertCMS::Modules::catalog($settings, config => $self->{config}) };
+        my $enabled = grep { $_->{enabled} } @modules;
+        $value = int($enabled) . ' enabled';
+        $detail = scalar(@modules) . ' first-party features in catalog';
+        $href = '/admin/settings/modules';
+    } elsif ($key eq 'billing_usage') {
+        $value = 'Billing';
+        $detail = 'Plan, quotas, email, and payments';
+        $href = '/admin/billing';
+    } elsif ($key eq 'realtime_status') {
+        my $status = DesertCMS::Realtime->service_status($self->{config});
+        $value = $status->{enabled} ? 'Enabled' : 'Disabled';
+        $detail = $status->{host} . ':' . $status->{port};
+        $href = '/admin/settings/realtime';
+    } else {
+        $value = $label;
+        $detail = 'Manifest-provided dashboard widget';
+    }
+    my $safe_value = escape_html($value);
+    my $safe_detail = escape_html($detail);
+    my $safe_href = escape_html($href);
+    return qq{<a class="dashboard-widget dashboard-widget--$size" href="$safe_href"><span>$label</span><strong>$safe_value</strong><small>$safe_detail</small></a>};
+}
+
+sub _dashboard_widget_size_class {
+    my ($size) = @_;
+    return _clean_choice($size, 'medium', qw(small medium large wide));
+}
+
 sub _admin_icon {
     my ($name) = @_;
     my %paths = (
@@ -4492,18 +4821,22 @@ sub _editor_home {
     my $nav_count = scalar @{DesertCMS::Navigation::list_items($self->{config}, $self->{db})};
     my $redirect_count = scalar @{DesertCMS::Redirects::list_rules($self->{config}, $self->{db})};
     my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $posts_enabled = $self->_posts_module_enabled;
     my $enabled_modules = 0;
     for my $module (@{DesertCMS::Modules::definitions($settings)}) {
         $enabled_modules++ if $module->{enabled};
     }
     my $is_contributor_product = DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config});
-    my $editor_nav = _editor_nav('overview', $self->{config}, $session);
+    my $editor_nav = _editor_nav('overview', $self->{config}, $session, $settings);
     my $editor_actions = '';
     if (_has_capability($self->{config}, $session, 'edit_content')) {
+        my $post_action = $posts_enabled
+            ? '<a class="button-link secondary" href="/admin/posts/new">New post</a>'
+            : '';
         $editor_actions = <<"HTML";
     <div class="actions">
       <a class="button-link" href="/admin/pages/new">New page</a>
-      <a class="button-link secondary" href="/admin/posts/new">New post</a>
+      $post_action
     </div>
 HTML
     }
@@ -4526,6 +4859,7 @@ HTML
         { href => '/admin/settings/modules',  eyebrow => 'Features',   title => 'Modules',          body => "Turn public feature areas on or off and open each module's focused settings.", detail => "$enabled_modules enabled", capability => 'view_features' },
         { href => '/admin/site-settings',     eyebrow => 'Site',       title => 'Site & SEO',       body => 'Set identity, homepage defaults, search metadata, indexing, and theme defaults.', detail => 'Identity, SEO, theme', capability => 'view_design' },
     );
+    @workflow_card_defs = grep { $posts_enabled || ($_->{href} || '') ne '/admin/posts' } @workflow_card_defs;
     my $workflow_cards = _capability_link_cards($self->{config}, $session, @workflow_card_defs);
     my $hero_eyebrow = $is_contributor_product ? 'Site Builder' : 'Editor';
     my $hero_title = $is_contributor_product ? 'Build Your Site' : 'Build the Site';
@@ -4563,12 +4897,22 @@ sub _content_type_count {
     return int($count || 0);
 }
 
+sub _posts_module_enabled {
+    my ($self) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return DesertCMS::Modules::enabled($settings, 'posts') ? 1 : 0;
+}
+
 sub _editor_nav {
-    my ($active, $config, $session) = @_;
+    my ($active, $config, $session, $settings) = @_;
     my $role = $session ? $session->{role} : 'owner';
     my $is_contributor_product = $config && DesertCMS::CapabilityPolicy::contributor_product_mode($config);
+    my $posts_enabled = $settings && exists $settings->{module_posts_enabled}
+        ? DesertCMS::Modules::enabled($settings, 'posts')
+        : 1;
     my %module_active = map { $_ => 1 } qw(
-        modules shop map gallery showcase forms docs events directory bookings membership newsletter donations testimonials
+        modules posts shop map gallery showcase forms docs events directory bookings membership newsletter donations testimonials
+        accounts live_streaming forums social notifications security_center
     );
     return '' if $module_active{$active || ''};
     my @links = $is_contributor_product ? (
@@ -4598,6 +4942,7 @@ sub _editor_nav {
     my $html = qq{<nav class="editor-nav" aria-label="$label">};
     for my $link (@links) {
         my ($key, $href, $label, $capability) = @{$link};
+        next if $key eq 'posts' && !$posts_enabled;
         next if $config && $capability
             && !DesertCMS::CapabilityPolicy::has($config, $role, $capability);
         my $class = $key eq ($active || '') ? ' class="active"' : '';
@@ -4615,14 +4960,15 @@ sub _module_setup_nav {
     $settings ||= eval { DesertCMS::Settings::all($config, $self->{db}) } || {};
     my $is_contributor_product = DesertCMS::CapabilityPolicy::contributor_product_mode($config);
     my %primary_setup_keys = map { $_ => 1 } qw(
-        map shop events directory bookings membership newsletter donations testimonials gallery forms docs
+        posts map shop events directory bookings membership newsletter donations testimonials gallery forms docs
+        accounts live_streaming forums social notifications security_center
     );
-    my @order = qw(events directory bookings membership newsletter donations testimonials shop map gallery forms docs);
+    my @order = qw(posts events directory bookings membership newsletter donations testimonials shop accounts forums social live_streaming notifications security_center map gallery forms docs);
     my %order_index = map { $order[$_] => $_ } 0 .. $#order;
     my %by_key = map { ($_->{key} || '') => $_ } @{ DesertCMS::Modules::catalog($settings, config => $config) };
     my $normalized_active = $active || '';
     $normalized_active = 'gallery' if $normalized_active eq 'showcase';
-    my %tool_setup_keys = map { $_ => 1 } qw(map gallery forms docs);
+    my %tool_setup_keys = map { $_ => 1 } qw(map gallery forms docs notifications security_center);
     my (@feature_links, @tool_links);
     for my $module (
         sort {
@@ -4855,7 +5201,7 @@ sub _content_list {
             'Create a new page to build the public site structure. Published pages will appear here with their public paths.',
         ];
     my $active = $is_post ? 'posts' : 'pages';
-    my $editor_nav = _editor_nav($active, $self->{config}, $session);
+    my $editor_nav = _editor_nav($active, $self->{config}, $session, DesertCMS::Settings::all($self->{config}, $self->{db}));
     my $message = $args{message} || '';
     $message = 'Deleted.' if !$message && $request->param('deleted');
     my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
@@ -4932,6 +5278,7 @@ HTML
 
 sub _content_comments {
     my ($self, $request, $session, $session_token, $content_id) = @_;
+    return $self->_not_found unless $self->_posts_module_enabled;
     my $csrf = $self->{auth}->csrf_token($session_token);
     my $thread = eval {
         $self->{comments}->admin_thread(content_id => $content_id);
@@ -5950,6 +6297,7 @@ sub _content_form {
     my $publish_action = $item ? "/admin/content/$item->{id}/publish" : '';
     my $type = $item ? $item->{type} : ($default_type || $request->param('type') || 'page');
     $type = $type eq 'post' ? 'post' : 'page';
+    return $self->_not_found if $type eq 'post' && !$self->_posts_module_enabled;
     my $heading = $item ? ($type eq 'post' ? 'Edit Post' : 'Edit Page') : ($type eq 'post' ? 'New Post' : 'New Page');
     my $title = escape_html($item ? $item->{title} : '');
     my $slug = escape_html($item ? $item->{slug} : '');
@@ -6257,6 +6605,8 @@ HTML
 
 sub _content_create {
     my ($self, $request, $session) = @_;
+    return $self->_not_found
+        if ($request->param('type') || '') eq 'post' && !$self->_posts_module_enabled;
     my %location = $self->_content_location_args($request, undef);
     my %access = $self->_content_access_args($request, undef);
     my $item = $self->{content}->save(
@@ -6287,6 +6637,9 @@ sub _content_update {
     my ($self, $request, $session, $session_token, $id) = @_;
     my $existing = $self->{content}->get($id);
     return $self->_not_found unless $existing;
+    return $self->_not_found
+        if ((($existing->{type} || '') eq 'post' || ($request->param('type') || '') eq 'post')
+            && !$self->_posts_module_enabled);
     my %location = $self->_content_location_args($request, $existing);
     my %access = $self->_content_access_args($request, $existing);
     my $item = $self->{content}->save(
@@ -6414,6 +6767,7 @@ sub _content_preview {
     my ($self, $request, $session, $session_token, $id) = @_;
     my $item = $self->{content}->get($id);
     return $self->_not_found if !$item;
+    return $self->_not_found if ($item->{type} || '') eq 'post' && !$self->_posts_module_enabled;
     my $html = DesertCMS::Renderer::render_item($self->{config}, $item, $self->{db});
     my $banner = '<div style="position:sticky;top:0;z-index:9999;padding:10px 16px;background:#171411;color:#fff;font:600 14px system-ui,sans-serif">Draft preview. This page has not necessarily been published.</div>';
     $html =~ s{<body>}{<body>\n$banner}i;
@@ -6430,6 +6784,8 @@ sub _content_preview {
 
 sub _content_publish {
     my ($self, $request, $session, $session_token, $id) = @_;
+    my $existing = $self->{content}->get($id);
+    return $self->_not_found if $existing && ($existing->{type} || '') eq 'post' && !$self->_posts_module_enabled;
     my $item = eval {
         $self->{content}->publish(id => $id, author_user_id => $session->{user_id});
     };
@@ -6442,6 +6798,7 @@ sub _content_delete {
     my ($self, $request, $session, $session_token, $id) = @_;
     my $item = $self->{content}->get($id);
     return $self->_not_found unless $item;
+    return $self->_not_found if ($item->{type} || '') eq 'post' && !$self->_posts_module_enabled;
 
     my $target = ($item->{type} || '') eq 'post' ? '/admin/posts' : '/admin/pages';
     my $deleted = eval {
@@ -9610,6 +9967,41 @@ sub _admin_datetime_value {
     return sprintf('%04d-%02d-%02dT%02d:%02d', $dt->year, $dt->month, $dt->day, $dt->hour, $dt->minute);
 }
 
+sub _admin_parse_datetime_value {
+    my ($value, $timezone) = @_;
+    $value = '' unless defined $value;
+    $value =~ s/\A\s+|\s+\z//g;
+    return undef unless length $value;
+    return int($value) if $value =~ /\A[0-9]{9,12}\z/;
+    my ($year, $month, $day, $hour, $minute, $second);
+    if ($value =~ /\A([0-9]{4})-([0-9]{2})-([0-9]{2})(?:[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?)?\z/) {
+        ($year, $month, $day, $hour, $minute, $second) = (int($1), int($2), int($3), int($4 || 0), int($5 || 0), int($6 || 0));
+    } else {
+        die "scheduled time is invalid";
+    }
+    die "scheduled time is invalid"
+        unless $month >= 1 && $month <= 12
+        && $day >= 1 && $day <= 31
+        && $hour >= 0 && $hour <= 23
+        && $minute >= 0 && $minute <= 59
+        && $second >= 0 && $second <= 59;
+    my $dt = eval {
+        DesertCMS::DateTimeLite->new(
+            year => $year, month => $month, day => $day,
+            hour => $hour, minute => $minute, second => $second,
+            time_zone => $timezone || 'UTC',
+        );
+    };
+    die "scheduled time is invalid" unless $dt;
+    die "scheduled time is invalid"
+        unless $dt->year == $year
+        && $dt->month == $month
+        && $dt->day == $day
+        && $dt->hour == $hour
+        && $dt->minute == $minute;
+    return $dt->epoch;
+}
+
 sub _navigation_page {
     my ($self, $request, $session, $session_token, $message) = @_;
     my $csrf = $self->{auth}->csrf_token($session_token);
@@ -10289,6 +10681,38 @@ sub _site_settings_page {
         [ soft   => 'Soft cards' ],
         [ round  => 'Round cards' ],
     ]);
+    my $background_effect_options = _select_options($settings->{theme_background_effect}, [
+        [ none     => 'None' ],
+        [ wash     => 'Color wash' ],
+        [ grain    => 'Fine grain' ],
+        [ vignette => 'Vignette' ],
+    ]);
+    my $motion_effect_options = _select_options($settings->{theme_motion_effect}, [
+        [ none   => 'None' ],
+        [ subtle => 'Subtle hover' ],
+        [ lift   => 'Lift cards' ],
+    ]);
+    my $lighting_effect_options = _select_options($settings->{theme_lighting_effect}, [
+        [ none => 'None' ],
+        [ soft => 'Soft depth' ],
+        [ glow => 'Accent glow' ],
+    ]);
+    my $box_shape_options = _select_options($settings->{theme_box_shape}, [
+        [ square => 'Square' ],
+        [ soft   => 'Soft' ],
+        [ round  => 'Rounded' ],
+        [ pill   => 'Pill' ],
+    ]);
+    my $gradient_style_options = _select_options($settings->{theme_gradient_style}, [
+        [ none   => 'None' ],
+        [ accent => 'Accent blend' ],
+        [ split  => 'Split color' ],
+        [ sheen  => 'Sheen' ],
+    ]);
+    my $box_transparency = _clean_int_range($settings->{theme_box_transparency}, 0, 80, 0);
+    my $outline_transparency = _clean_int_range($settings->{theme_outline_transparency}, 0, 80, 0);
+    my $unsplash_checked = $settings->{theme_unsplash_enabled} ? 'checked' : '';
+    my $unsplash_key = escape_html($settings->{unsplash_access_key} || '');
     my $footer_layout_options = _select_options($settings->{site_footer_layout}, [
         [ standard => 'Standard' ],
         [ compact  => 'Compact' ],
@@ -10346,6 +10770,47 @@ sub _site_settings_page {
                   <input type="file" name="site_background" accept="image/jpeg,image/png,image/webp">
                 </label>
                 <div class="settings-preview">$background_preview</div>
+              </div>
+            </section>
+            <section class="settings-subsection theme-effects-panel">
+              <h4>Images and Effects</h4>
+              <label class="check-row">
+                <input type="checkbox" name="theme_unsplash_enabled" value="1" $unsplash_checked>
+                <span>Enable Unsplash image sourcing</span>
+              </label>
+              <label>
+                <span>Unsplash access key</span>
+                <input name="unsplash_access_key" value="$unsplash_key" autocomplete="off">
+              </label>
+              <div class="layout-control-grid">
+                <label>
+                  <span>Background effect</span>
+                  <select name="theme_background_effect">$background_effect_options</select>
+                </label>
+                <label>
+                  <span>Motion effect</span>
+                  <select name="theme_motion_effect">$motion_effect_options</select>
+                </label>
+                <label>
+                  <span>Lighting effect</span>
+                  <select name="theme_lighting_effect">$lighting_effect_options</select>
+                </label>
+                <label>
+                  <span>Gradient style</span>
+                  <select name="theme_gradient_style">$gradient_style_options</select>
+                </label>
+                <label>
+                  <span>Box shape</span>
+                  <select name="theme_box_shape">$box_shape_options</select>
+                </label>
+                <label>
+                  <span>Box transparency</span>
+                  <input name="theme_box_transparency" type="range" min="0" max="80" value="$box_transparency">
+                </label>
+                <label>
+                  <span>Outline transparency</span>
+                  <input name="theme_outline_transparency" type="range" min="0" max="80" value="$outline_transparency">
+                </label>
               </div>
             </section>
           </aside>
@@ -10794,6 +11259,15 @@ sub _site_settings_save {
                 theme_card_style      => _clean_choice($request->param('theme_card_style'), 'outlined', qw(flat outlined raised)),
                 theme_card_radius     => _clean_choice($request->param('theme_card_radius'), 'soft', qw(square soft round)),
                 font_package_repo     => DesertCMS::FontPackages::clean_repo($request->param('font_package_repo')),
+                theme_unsplash_enabled => $request->param('theme_unsplash_enabled') ? 1 : 0,
+                unsplash_access_key   => _clean_template_text($request->param('unsplash_access_key'), 200),
+                theme_background_effect => _clean_choice($request->param('theme_background_effect'), 'none', qw(none wash grain vignette)),
+                theme_motion_effect   => _clean_choice($request->param('theme_motion_effect'), 'none', qw(none subtle lift)),
+                theme_lighting_effect => _clean_choice($request->param('theme_lighting_effect'), 'none', qw(none soft glow)),
+                theme_box_transparency => _clean_int_range($request->param('theme_box_transparency'), 0, 80, 0),
+                theme_outline_transparency => _clean_int_range($request->param('theme_outline_transparency'), 0, 80, 0),
+                theme_box_shape       => _clean_choice($request->param('theme_box_shape'), 'soft', qw(square soft round pill)),
+                theme_gradient_style  => _clean_choice($request->param('theme_gradient_style'), 'none', qw(none accent split sheen)),
                 theme_light_preset    => $self->_clean_theme_preset($request->param('theme_light_preset'), 'light'),
                 theme_dark_preset     => $self->_clean_theme_preset($request->param('theme_dark_preset'), 'dark'),
                 theme_default_mode    => ($request->param('theme_default_mode') || '') eq 'dark' ? 'dark' : 'light',
@@ -10803,6 +11277,7 @@ sub _site_settings_save {
             $values{theme_preset} = $values{theme_default_mode} eq 'dark'
                 ? $values{theme_dark_preset}
                 : $values{theme_light_preset};
+            _apply_theme_preset_recommended_fonts(\%values, $settings);
 
             my $defaults = DesertCMS::SiteTheme::custom_settings_defaults();
             for my $name (qw(ink muted paper panel field line accent accent_dark support button_ink)) {
@@ -11093,6 +11568,7 @@ sub _settings_nav {
     my $role = $session ? $session->{role} : 'owner';
     if (DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config})) {
         my @contributor_links = (
+            [ dashboard => '/admin/settings/dashboard', 'Dashboard', 'view_home' ],
             [ account => '/admin/settings/account', 'Account', 'manage_account' ],
             [ help    => '/admin/help',             'Help',    'view_home' ],
         );
@@ -11130,12 +11606,15 @@ sub _settings_nav {
     }
     my @links = (
         [ overview     => '/admin/settings',                'Overview',           'view_settings' ],
+        [ dashboard    => '/admin/settings/dashboard',      'Dashboard',          'view_home' ],
         [ control      => '/admin/settings/master-control', 'Master Control',     'view_master_control' ],
         [ payments     => '/admin/settings/payments',       'Payments',           'view_master_control' ],
         [ account      => '/admin/settings/account',        'Admin Account',      'manage_account' ],
     );
     push @links, [ contributors => $contributor_href, 'Contributor', '' ] if length $contributor_href;
     push @links, (
+        [ security    => '/admin/settings/security',      'Security',           'view_security_center' ],
+        [ realtime    => '/admin/settings/realtime',      'Realtime',           'view_realtime' ],
         [ upgrade      => '/admin/settings/upgrade',        'Upgrade',            'run_upgrades' ],
         [ operations   => '/admin/settings/operations',     'Operations',         'view_operations' ],
     );
@@ -11506,6 +11985,154 @@ HTML
     return $html;
 }
 
+sub _settings_dashboard_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_settings_nav('dashboard', $session);
+    my $widgets = $self->{dashboard}->widgets_for_user(
+        user_id => $session ? $session->{user_id} : 0,
+        role    => $session ? ($session->{role} || 'owner') : 'owner',
+    );
+    my $rows = '';
+    for my $widget (@{$widgets}) {
+        my $key = $widget->{key} || next;
+        my $safe_key = escape_html($key);
+        my $label = escape_html($widget->{label} || $key);
+        my $capability = $widget->{capability} || '';
+        my $allowed = length($capability) ? _has_capability($self->{config}, $session, $capability) : 1;
+        my $checked = $widget->{enabled} && $allowed ? 'checked' : '';
+        my $disabled = $allowed ? '' : 'disabled';
+        my $capability_label = length($capability) ? '<code>' . escape_html($capability) . '</code>' : '<span class="muted">No capability gate</span>';
+        my $position = int($widget->{position} || 100);
+        my $size_options = _dashboard_size_options($widget->{size});
+        my $state = $allowed ? '<span class="status-pill ok">Available</span>' : '<span class="status-pill warn">Not allowed</span>';
+        $rows .= <<"HTML";
+<article class="dashboard-widget-option">
+  <label class="checkbox-field">
+    <input type="checkbox" name="widget_${safe_key}_enabled" value="1" $checked $disabled>
+    <span><strong>$label</strong><small>$capability_label</small></span>
+  </label>
+  <div class="field-row">
+    <label><span>Size</span><select name="widget_${safe_key}_size" $disabled>$size_options</select></label>
+    <label><span>Position</span><input name="widget_${safe_key}_position" value="$position" inputmode="numeric" $disabled></label>
+  </div>
+  $state
+</article>
+HTML
+    }
+    $rows ||= _admin_empty_panel('No dashboard widgets registered.', 'Module manifests provide dashboard widgets as v3 modules are enabled.');
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Dashboard</p>
+        <h1>Dashboard Widgets</h1>
+        <p>Choose the quick-peek widgets that appear above analytics on the admin dashboard. Widget availability follows role capabilities and enabled modules.</p>
+      </div>
+      <a class="button-link secondary" href="/admin">Open dashboard</a>
+    </div>
+    $notice
+    <form method="post" action="/admin/settings/dashboard" class="settings-form settings-form--wide">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <section class="dashboard-widget-option-grid">
+        $rows
+      </section>
+      <button type="submit">Save dashboard widgets</button>
+    </form>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Dashboard Settings', $body, $session);
+}
+
+sub _settings_dashboard_save {
+    my ($self, $request, $session, $session_token) = @_;
+    my (%enabled, %sizes, %positions);
+    for my $widget (@{ $self->{dashboard}->widget_catalog }) {
+        my $key = $widget->{key} || next;
+        next if ($widget->{capability} || '') && !_has_capability($self->{config}, $session, $widget->{capability});
+        $enabled{$key} = $request->param("widget_${key}_enabled") ? 1 : 0;
+        $sizes{$key} = _dashboard_widget_size_class($request->param("widget_${key}_size") || $widget->{size});
+        $positions{$key} = int($request->param("widget_${key}_position") || 100);
+    }
+    $self->{dashboard}->save_widgets(
+        user_id => $session ? $session->{user_id} : 0,
+        role    => $session ? ($session->{role} || 'owner') : 'owner',
+        values  => {
+            enabled   => \%enabled,
+            sizes     => \%sizes,
+            positions => \%positions,
+        },
+    );
+    $self->_audit_admin_action(
+        $session,
+        action       => 'settings.dashboard_saved',
+        subject_type => 'settings',
+        details      => { widgets => [ sort keys %enabled ] },
+    );
+    return $self->_settings_dashboard_page($request, $session, $session_token, 'Dashboard widgets saved.');
+}
+
+sub _dashboard_size_options {
+    my ($selected) = @_;
+    $selected = _dashboard_widget_size_class($selected);
+    my @options = (
+        [ small  => 'Small' ],
+        [ medium => 'Medium' ],
+        [ large  => 'Large' ],
+        [ wide   => 'Wide' ],
+    );
+    return join '', map {
+        my ($value, $label) = @{$_};
+        my $is_selected = $value eq $selected ? ' selected' : '';
+        '<option value="' . $value . '"' . $is_selected . '>' . $label . '</option>';
+    } @options;
+}
+
+sub _manifest_value_list {
+    my ($values, $empty) = @_;
+    return '<p class="muted">' . escape_html($empty || 'Nothing registered.') . '</p>'
+        unless $values && ref($values) eq 'ARRAY' && @{$values};
+    my $html = '<ul class="v3-manifest-list">';
+    for my $value (@{$values}) {
+        $html .= '<li><code>' . escape_html(_manifest_scalar($value)) . '</code></li>';
+    }
+    $html .= '</ul>';
+    return $html;
+}
+
+sub _manifest_object_list {
+    my ($items, $fields, $empty) = @_;
+    return '<p class="muted">' . escape_html($empty || 'Nothing registered.') . '</p>'
+        unless $items && ref($items) eq 'ARRAY' && @{$items};
+    my $html = '<div class="v3-manifest-list v3-manifest-list--objects">';
+    for my $item (@{$items}) {
+        next unless ref($item) eq 'HASH';
+        my $title = escape_html($item->{label} || $item->{key} || $item->{path} || 'Item');
+        $html .= "<article><strong>$title</strong><dl>";
+        for my $field (@{$fields || []}) {
+            next unless exists $item->{$field} && defined $item->{$field} && length _manifest_scalar($item->{$field});
+            my $safe_field = escape_html($field);
+            my $safe_value = escape_html(_manifest_scalar($item->{$field}));
+            $html .= "<div><dt>$safe_field</dt><dd><code>$safe_value</code></dd></div>";
+        }
+        $html .= '</dl></article>';
+    }
+    $html .= '</div>';
+    return $html;
+}
+
+sub _manifest_scalar {
+    my ($value) = @_;
+    return '' unless defined $value;
+    return join ', ', @{$value} if ref($value) eq 'ARRAY';
+    return join ', ', map { $_ . '=' . ($value->{$_} // '') } sort keys %{$value} if ref($value) eq 'HASH';
+    return "$value";
+}
+
 sub _settings_page {
     my ($self, $request, $session, $session_token, $message) = @_;
     return DesertCMS::HTTP->redirect('/admin/settings/account', { security_headers() })
@@ -11555,10 +12182,14 @@ sub _settings_page {
     my $settings_cards = _capability_link_cards(
         $self->{config},
         $session,
+        { href => '/admin/settings/dashboard',      eyebrow => 'Dashboard',     title => 'Dashboard Widgets',   body => 'Choose quick-peek cards for analytics, notifications, modules, security, billing, and realtime status.', detail => 'Custom admin home', capability => 'view_home' },
         { href => '/admin/settings/account',        eyebrow => 'Access',        title => 'Admin Account',       body => 'Update your login, manage scoped admin access, and review federated contributor content.', detail => "$pending_federated pending review item(s)", capability => 'manage_account' },
         { href => '/admin/settings/master-control', eyebrow => 'Control Plane', title => 'Master Control',      body => 'Review the contributor subCMS fleet, provider readiness, queue state, paths, backups, DNS, and TLS.', detail => "$site_count sites, $queue_open queued", capability => 'view_master_control' },
         { href => '/admin/settings/payments',       eyebrow => 'Providers',     title => 'Payments & Stripe',   body => 'Centralize Stripe credentials, webhook signing, checkout mode, service billing, and payment-module readiness.', detail => 'Shop, Events, Bookings, Membership, Donations', capability => 'view_master_control' },
         { href => ($contributor_href || '/admin/settings/contributors'), eyebrow => 'Contributor', title => 'Contributor Program', body => 'Review requests, manage blueprints, service plans, and contributor sites from one grouped surface.', detail => "$pending_invites invites, $plan_count plan(s), $site_count site(s)", capability => 'view_settings' },
+        { href => '/admin/notifications',           eyebrow => 'Events',        title => 'Notification Center', body => 'Review admin and public notifications emitted by enabled modules and v3 adapters.', detail => 'Admin/public event bus', capability => 'view_notifications' },
+        { href => '/admin/settings/security',       eyebrow => 'Security',      title => 'Security Center',     body => 'Run read-only OpenBSD, pf, httpd, acme-client, package, header, tenant, backup, and module checks.', detail => 'Read-only checks', capability => 'view_security_center' },
+        { href => '/admin/settings/realtime',       eyebrow => 'Realtime',      title => 'Realtime Service',    body => 'Configure the small Perl SSE/WebSocket adapter for notifications, live chat, stream presence, and dashboard updates.', detail => 'Perl service contract', capability => 'view_realtime' },
         { href => '/admin/settings/upgrade',        eyebrow => 'Release',       title => 'Upgrade DesertCMS',   body => 'Stage a new release archive and let the root worker apply it.',                            detail => $upgrade_status, capability => 'run_upgrades' },
         { href => '/admin/settings/operations',     eyebrow => 'Recovery',      title => 'Operations',          body => 'Run fleet rebuilds, backups, sitemap submission, restore tests, rollbacks, and redacted support bundles.', detail => 'Backups, health, recovery', capability => 'view_operations' },
     );
@@ -11584,6 +12215,375 @@ sub _settings_page {
 HTML
 
     return $self->_html_response('Settings', $body, $session);
+}
+
+sub _notifications_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $module = $self->_module_feature_state($settings, 'notifications');
+    my $status = _module_status_html($module, $self->{config});
+    my $unread = $self->{notifications}->unread_count(audience => 'admin');
+    my $due_deliveries = $self->{notifications}->retryable_deliveries(now => now(), limit => 200);
+    my $delivery_rows = $self->_notification_delivery_rows;
+    my $rows = '';
+    for my $notification (@{ $self->{notifications}->list(audience => 'admin', limit => 80) }) {
+        my $id = int($notification->{id});
+        my $severity = escape_html($notification->{severity} || 'info');
+        my $topic = escape_html($notification->{topic} || '');
+        my $module_key = escape_html($notification->{module_key} || 'system');
+        my $title = escape_html($notification->{title} || '');
+        my $body = escape_html($notification->{body} || '');
+        my $created = escape_html(_format_time($notification->{created_at}));
+        my $state = ($notification->{status} || '') eq 'read'
+            ? '<span class="status-pill status-pill--neutral">Read</span>'
+            : '<span class="status-pill ok">Unread</span>';
+        my $mark = ($notification->{status} || '') eq 'unread'
+            ? qq{<form method="post" action="/admin/notifications/mark-read" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="id" value="$id"><button type="submit" class="button-link secondary button-link--compact">Mark read</button></form>}
+            : '';
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="State">$state</td>
+  <td data-label="Severity"><span class="status-pill status-pill--neutral">$severity</span></td>
+  <td data-label="Topic"><code>$topic</code><small>$module_key</small></td>
+  <td data-label="Message"><strong>$title</strong><small>$body</small></td>
+  <td data-label="Created">$created</td>
+  <td data-label="Actions" class="table-actions">$mark</td>
+</tr>
+HTML
+    }
+    $rows ||= _admin_empty_row(6, 'No notifications yet.', 'Module events, security checks, failed deliveries, social activity, carts, and streaming updates will appear here as modules emit them.');
+    my $summary = _settings_summary_strip(
+        [ 'Module', $status, 'Notifications is a first-party v3 module.' ],
+        [ 'Unread', '<strong>' . int($unread) . '</strong>', 'Admin-side notifications waiting for attention.' ],
+        [ 'Topics', '<strong>' . scalar(@{ $self->{notifications}->topics }) . '</strong>', 'Registered manifest topics across active code.' ],
+        [ 'Delivery Queue', '<strong>' . scalar(@{$due_deliveries}) . '</strong>', 'Queued or failed deliveries currently due for retry.' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Notifications</p>
+        <h1>Notification Center</h1>
+        <p>Central admin inbox for module events, failed deliveries, security checks, public account activity, carts, social activity, and streaming state.</p>
+      </div>
+      <div class="button-row">
+        <a class="button-link secondary" href="/admin/settings/modules/notifications">Module contract</a>
+        <form method="post" action="/admin/notifications/retry-due" class="inline-form">
+          <input type="hidden" name="csrf_token" value="$csrf">
+          <button type="submit" class="button-link secondary button-link--compact">Retry due deliveries</button>
+        </form>
+      </div>
+    </div>
+    $notice
+    $summary
+    <table class="content-table compact-table admin-card-table">
+      <thead><tr><th>State</th><th>Severity</th><th>Topic</th><th>Message</th><th>Created</th><th></th></tr></thead>
+      <tbody>$rows</tbody>
+    </table>
+    <h2>Delivery Queue</h2>
+    <table class="content-table compact-table admin-card-table">
+      <thead><tr><th>Delivery</th><th>Channel</th><th>Status</th><th>Attempts</th><th>Next Retry</th><th>Error</th></tr></thead>
+      <tbody>$delivery_rows</tbody>
+    </table>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Notifications', $body, $session);
+}
+
+sub _notifications_mark_read {
+    my ($self, $request, $session, $session_token) = @_;
+    my $id = int($request->param('id') || 0);
+    $self->{notifications}->mark_read(id => $id, audience => 'admin') if $id;
+    return DesertCMS::HTTP->redirect('/admin/notifications', { security_headers() });
+}
+
+sub _notifications_retry_due {
+    my ($self, $request, $session, $session_token) = @_;
+    my $results = eval {
+        $self->{notifications}->retry_due_deliveries(
+            now              => now(),
+            limit            => 50,
+            realtime_adapter => $self->_realtime_publish_adapter,
+        );
+    };
+    return $self->_notifications_page($request, $session, $session_token, $@ || 'Notification deliveries could not be retried.') unless $results;
+    my %counts;
+    $counts{$_->{status} || 'unknown'}++ for @{$results};
+    $self->_audit_admin_action(
+        $session,
+        action       => 'notifications.retry_due',
+        subject_type => 'notification_delivery',
+        details      => { retried => scalar(@{$results}), statuses => \%counts },
+    );
+    my $message = scalar(@{$results}) . ' notification delivery retry attempt(s) processed.';
+    return $self->_notifications_page($request, $session, $session_token, $message);
+}
+
+sub _notification_delivery_rows {
+    my ($self) = @_;
+    my $future = now() + 365 * 24 * 60 * 60;
+    my $rows = '';
+    for my $delivery (@{ $self->{notifications}->retryable_deliveries(now => $future, limit => 50) }) {
+        my $id = int($delivery->{id} || 0);
+        my $notification_id = int($delivery->{notification_id} || 0);
+        my $topic = escape_html($delivery->{topic} || '');
+        my $channel = escape_html($delivery->{delivery_channel} || '');
+        my $status = escape_html($delivery->{status} || '');
+        my $attempts = int($delivery->{attempts} || 0);
+        my $next_retry = escape_html(_format_time($delivery->{next_retry_at}));
+        my $error = escape_html($delivery->{last_error} || '');
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Delivery"><strong>#$id</strong><small>Notification #$notification_id / <code>$topic</code></small></td>
+  <td data-label="Channel"><code>$channel</code></td>
+  <td data-label="Status"><span class="status-pill status-pill--neutral">$status</span></td>
+  <td data-label="Attempts">$attempts</td>
+  <td data-label="Next Retry">$next_retry</td>
+  <td data-label="Error">$error</td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(6, 'No queued or failed notification deliveries.', 'Delivery failures and adapter retry state will appear here.');
+}
+
+sub _security_center_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    return DesertCMS::HTTP->redirect('/admin/settings/account', { security_headers() })
+        if DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config});
+
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_settings_nav('security', $session);
+    my $checks = $self->{security_center}->run_checks;
+    my ($ok, $warn, $critical) = (0, 0, 0);
+    my $rows = '';
+    for my $check (@{$checks}) {
+        my $status = $check->{status} || 'warning';
+        $ok++ if $status eq 'ok';
+        $warn++ if $status eq 'warning';
+        $critical++ if $status eq 'critical';
+        my $key = escape_html($check->{key} || '');
+        my $label = escape_html($check->{label} || $check->{key} || '');
+        my $detail = escape_html($check->{detail} || '');
+        my $pill = _security_check_pill($status);
+        my $action = escape_html($check->{fix_action} || '');
+        my $queue = length($action)
+            ? qq{<form method="post" action="/admin/settings/security/queue" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="check_key" value="$key"><input type="hidden" name="action" value="$action"><button type="submit" class="button-link secondary button-link--compact">Queue fix</button></form>}
+            : '<span class="muted">Read-only</span>';
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Status">$pill</td>
+  <td data-label="Check"><strong>$label</strong><small><code>$key</code></small></td>
+  <td data-label="Detail">$detail</td>
+  <td data-label="Action" class="table-actions">$queue</td>
+</tr>
+HTML
+    }
+    my $manifest_count = scalar @{ $self->{security_center}->manifest_checks };
+    my $summary = _settings_summary_strip(
+        [ 'OK', '<strong>' . int($ok) . '</strong>', 'Checks passing or locally available.' ],
+        [ 'Warnings', '<strong>' . int($warn) . '</strong>', 'Review items and local-development deferrals.' ],
+        [ 'Critical', '<strong>' . int($critical) . '</strong>', 'Host checks that need attention on OpenBSD.' ],
+        [ 'Manifest checks', '<strong>' . int($manifest_count) . '</strong>', 'Security checks declared by v3 manifests.' ],
+        [ 'Mode', '<span class="status-pill ok">Read-only</span>', 'Fixes are queued only after explicit admin approval.' ],
+    );
+    my $section_nav = _module_section_nav(
+        'Security Center sections',
+        [ '#security-summary', 'Summary' ],
+        [ '#security-checks', 'Checks' ],
+        [ '#security-contract', 'Contract' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Security</p>
+        <h1>Security Center</h1>
+        <p>Read-only local checks for OpenBSD base, pf, httpd, acme-client, slowcgi, packages, headers, paths, tenant isolation, and streaming port readiness.</p>
+      </div>
+      <a class="button-link secondary" href="/admin/settings/modules/security-center">Module contract</a>
+    </div>
+    $notice
+    $section_nav
+    <section id="security-summary">$summary</section>
+    <section class="inspector-panel" id="security-checks">
+      <h2>Checks</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Status</th><th>Check</th><th>Detail</th><th>Action</th></tr></thead>
+        <tbody>$rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel" id="security-contract">
+      <h2>Covered Surfaces</h2>
+      <p class="muted">The v3 manifest registry includes DNS/TLS, httpd, pf, acme-client, CSP/security headers, file permissions, worker health, backups, tenant isolation, packages, syspatch, pkg_add, provider webhooks, and streaming ports.</p>
+    </section>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Security Center', $body, $session);
+}
+
+sub _security_center_queue {
+    my ($self, $request, $session, $session_token) = @_;
+    my $queued = eval {
+        $self->{security_center}->queue_fix(
+            check_key           => $request->param('check_key'),
+            action              => $request->param('action'),
+            approved_by_user_id => $session->{user_id},
+        );
+    };
+    if ($queued) {
+        eval {
+            $self->{notifications}->emit(
+                audience   => 'admin',
+                severity   => 'warning',
+                topic      => 'security.fix_queued',
+                module_key => 'security_center',
+                title      => 'Security remediation queued',
+                body       => 'A root-worker remediation was queued for ' . ($queued->{check_key} || 'security check') . '.',
+                url        => '/admin/settings/security',
+            );
+            1;
+        };
+        return $self->_security_center_page($request, $session, $session_token, 'Security remediation queued for root-worker approval.');
+    }
+    return $self->_security_center_page(
+        $request,
+        $session,
+        $session_token,
+        _admin_action_error('The remediation could not be queued.', 'Review the check and try again.', $@)
+    );
+}
+
+sub _settings_realtime_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    return DesertCMS::HTTP->redirect('/admin/settings/account', { security_headers() })
+        if DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config});
+
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $settings_nav = $self->_settings_nav('realtime', $session);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $checked = $settings->{realtime_enabled} ? 'checked' : '';
+    my $status_config = {
+        site_url                 => $self->{config}->get('site_url') || '',
+        realtime_enabled         => $settings->{realtime_enabled},
+        realtime_bind_host       => $settings->{realtime_bind_host},
+        realtime_port            => $settings->{realtime_port},
+        realtime_public_url      => $settings->{realtime_public_url},
+        realtime_allowed_origins => $settings->{realtime_allowed_origins},
+    };
+    my $status = DesertCMS::Realtime->service_status($status_config);
+    my $host = escape_html($settings->{realtime_bind_host} || $status->{host});
+    my $port = escape_html($settings->{realtime_port} || $status->{port});
+    my $public_url = escape_html($settings->{realtime_public_url} || '');
+    my $allowed_origins = escape_html($settings->{realtime_allowed_origins} || '');
+    my $service_url = escape_html($status->{url});
+    my $manifest = DesertCMS::Realtime->manifest;
+    my $channels = _manifest_value_list($manifest->{channels}, 'No channels registered.');
+    my $requirements = _manifest_value_list($manifest->{openbsd}{required_base}, 'No requirements registered.');
+    my $origin_config = {
+        site_url                 => $self->{config}->get('site_url') || '',
+        realtime_enabled         => $settings->{realtime_enabled},
+        realtime_bind_host       => $settings->{realtime_bind_host},
+        realtime_port            => $settings->{realtime_port},
+        realtime_public_url      => $settings->{realtime_public_url},
+        realtime_allowed_origins => $settings->{realtime_allowed_origins},
+    };
+    my $effective_origins = _manifest_value_list(
+        DesertCMS::Realtime->allowed_origins($origin_config),
+        'No browser origins are currently allowed.'
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Realtime</p>
+        <h1>Realtime Service</h1>
+        <p>A small Perl service dedicated to SSE/WebSocket notifications, live chat, stream presence, and dashboard widget updates.</p>
+      </div>
+      <span class="status-pill status-pill--neutral">Local service</span>
+    </div>
+    $notice
+    <form method="post" action="/admin/settings/realtime" class="settings-form settings-form--wide">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <section class="inspector-panel">
+        <h2>Status</h2>
+        <dl class="health-list health-list--compact">
+          <div><dt>Endpoint</dt><dd><code>$service_url</code></dd></div>
+          <div><dt>Runtime</dt><dd><code>Perl</code></dd></div>
+          <div><dt>OpenBSD base</dt><dd>$requirements</dd></div>
+          <div><dt>Channels</dt><dd>$channels</dd></div>
+          <div><dt>Browser origins</dt><dd>$effective_origins</dd></div>
+        </dl>
+        <label class="checkbox-field">
+          <input type="checkbox" name="realtime_enabled" value="1" $checked>
+          <span>Enable realtime adapters</span>
+        </label>
+      </section>
+      <section class="inspector-panel">
+        <h2>Binding</h2>
+        <div class="field-row">
+          <label><span>Bind host</span><input name="realtime_bind_host" value="$host"></label>
+          <label><span>Port</span><input name="realtime_port" value="$port" inputmode="numeric"></label>
+        </div>
+        <label><span>Public events URL</span><input name="realtime_public_url" value="$public_url" placeholder="https://example.com/events"></label>
+        <label><span>Allowed browser origins</span><textarea name="realtime_allowed_origins" rows="4" placeholder="https://example.com">$allowed_origins</textarea></label>
+        <p class="muted">Leave blank to allow the configured site origin and loopback service origins only. Cross-site SSE/WebSocket requests must match one exact origin per line.</p>
+        <p class="muted">Use loopback behind httpd unless pf and TLS routing are explicitly configured.</p>
+      </section>
+      <button type="submit">Save realtime settings</button>
+    </form>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Realtime Service', $body, $session);
+}
+
+sub _settings_realtime_save {
+    my ($self, $request, $session, $session_token) = @_;
+    my $host = $request->param('realtime_bind_host') || '127.0.0.1';
+    $host =~ s/[^A-Za-z0-9.:-]//g;
+    $host = '127.0.0.1' unless length $host;
+    my $port = int($request->param('realtime_port') || 8787);
+    $port = 8787 if $port < 1 || $port > 65535;
+    my $public_url = eval { DesertCMS::Realtime->normalize_public_url($request->param('realtime_public_url') || '') };
+    return $self->_settings_realtime_page($request, $session, $session_token, 'Realtime settings were not saved: ' . ($@ || 'public URL is invalid.'))
+        if !defined $public_url;
+    my $allowed_origins = eval { DesertCMS::Realtime->normalize_allowed_origins($request->param('realtime_allowed_origins') || '') };
+    return $self->_settings_realtime_page($request, $session, $session_token, 'Realtime settings were not saved: ' . ($@ || 'allowed origins are invalid.'))
+        if !defined $allowed_origins;
+    DesertCMS::Settings::set_many($self->{config}, $self->{db}, {
+        realtime_enabled         => $request->param('realtime_enabled') ? 1 : 0,
+        realtime_bind_host       => $host,
+        realtime_port            => $port,
+        realtime_public_url      => $public_url,
+        realtime_allowed_origins => $allowed_origins,
+    });
+    $self->_audit_admin_action(
+        $session,
+        action       => 'settings.realtime_saved',
+        subject_type => 'settings',
+        details      => { host => $host, port => $port, allowed_origin_count => scalar(split /\n/, $allowed_origins || '') },
+    );
+    return $self->_settings_realtime_page($request, $session, $session_token, 'Realtime settings saved.');
+}
+
+sub _security_check_pill {
+    my ($status) = @_;
+    $status ||= 'warning';
+    return '<span class="status-pill ok">OK</span>' if $status eq 'ok';
+    return '<span class="status-pill warn">Warning</span>' if $status eq 'warning';
+    return '<span class="status-pill danger">Critical</span>' if $status eq 'critical';
+    return '<span class="status-pill status-pill--neutral">' . escape_html($status) . '</span>';
 }
 
 sub _settings_payments_page {
@@ -13909,6 +14909,7 @@ sub _settings_blueprints_page {
     my $page_quota = int($selected->{page_quota} || 20);
     my $default_pages = escape_html(DesertCMS::Blueprints::default_pages_text($selected));
     my $default_checked = $selected->{is_default} ? 'checked' : '';
+    my $posts_checked = $editing ? ($selected->{module_posts_enabled} ? 'checked' : '') : 'checked';
     my $map_checked = $editing ? ($selected->{module_map_enabled} ? 'checked' : '') : 'checked';
     my $shop_checked = $selected->{module_shop_enabled} ? 'checked' : '';
     my $gallery_checked = $editing ? ($selected->{module_gallery_enabled} ? 'checked' : '') : 'checked';
@@ -13921,6 +14922,12 @@ sub _settings_blueprints_page {
     my $newsletter_checked = $selected->{module_newsletter_enabled} ? 'checked' : '';
     my $donations_checked = $selected->{module_donations_enabled} ? 'checked' : '';
     my $testimonials_checked = $selected->{module_testimonials_enabled} ? 'checked' : '';
+    my $accounts_checked = ($selected->{module_accounts_enabled} || $selected->{module_social_enabled}) ? 'checked' : '';
+    my $live_streaming_checked = $selected->{module_live_streaming_enabled} ? 'checked' : '';
+    my $forums_checked = $selected->{module_forums_enabled} ? 'checked' : '';
+    my $social_checked = $selected->{module_social_enabled} ? 'checked' : '';
+    my $notifications_checked = $editing ? ($selected->{module_notifications_enabled} ? 'checked' : '') : 'checked';
+    my $security_center_checked = $editing ? ($selected->{module_security_center_enabled} ? 'checked' : '') : 'checked';
     my $allow_gallery_checked = $editing ? ($selected->{allow_master_gallery} ? 'checked' : '') : 'checked';
     my $allow_posts_checked = $editing ? ($selected->{allow_master_posts} ? 'checked' : '') : 'checked';
     my $light_options = $self->_theme_options($selected->{theme_light_preset} || 'light-archive', 'light');
@@ -13993,6 +15000,7 @@ sub _settings_blueprints_page {
       <section class="inspector-panel" id="blueprint-modules">
         <h2>Modules</h2>
         <div class="blueprint-checkbox-grid">
+          <label class="checkbox-field"><input type="checkbox" name="module_posts_enabled" value="1" $posts_checked><span>Posts</span></label>
           <label class="checkbox-field"><input type="checkbox" name="module_map_enabled" value="1" $map_checked><span>Map / Locations</span></label>
           <label class="checkbox-field"><input type="checkbox" name="module_gallery_enabled" value="1" $gallery_checked><span>Showcase</span></label>
           <label class="checkbox-field"><input type="checkbox" name="module_shop_enabled" value="1" $shop_checked><span>Shop / Catalog</span></label>
@@ -14005,6 +15013,12 @@ sub _settings_blueprints_page {
           <label class="checkbox-field"><input type="checkbox" name="module_newsletter_enabled" value="1" $newsletter_checked><span>Newsletter</span></label>
           <label class="checkbox-field"><input type="checkbox" name="module_donations_enabled" value="1" $donations_checked><span>Donations / Fundraising</span></label>
           <label class="checkbox-field"><input type="checkbox" name="module_testimonials_enabled" value="1" $testimonials_checked><span>Testimonials / Reviews</span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_accounts_enabled" value="1" $accounts_checked><span>Accounts</span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_live_streaming_enabled" value="1" $live_streaming_checked><span>Live Streaming</span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_forums_enabled" value="1" $forums_checked><span>Forums</span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_social_enabled" value="1" $social_checked><span>Social<small>Enables Accounts for unified identity.</small></span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_notifications_enabled" value="1" $notifications_checked><span>Notifications</span></label>
+          <label class="checkbox-field"><input type="checkbox" name="module_security_center_enabled" value="1" $security_center_checked><span>Security Center</span></label>
         </div>
       </section>
       <section class="inspector-panel" id="blueprint-theme-seo">
@@ -14082,6 +15096,7 @@ sub _settings_blueprints_save {
             description => $request->param('description'),
             category => $request->param('category'),
             is_default => $request->param('is_default') ? 1 : 0,
+            module_posts_enabled => $request->param('module_posts_enabled') ? 1 : 0,
             module_map_enabled => $request->param('module_map_enabled') ? 1 : 0,
             module_shop_enabled => $request->param('module_shop_enabled') ? 1 : 0,
             module_gallery_enabled => $request->param('module_gallery_enabled') ? 1 : 0,
@@ -14094,6 +15109,12 @@ sub _settings_blueprints_save {
             module_newsletter_enabled => $request->param('module_newsletter_enabled') ? 1 : 0,
             module_donations_enabled => $request->param('module_donations_enabled') ? 1 : 0,
             module_testimonials_enabled => $request->param('module_testimonials_enabled') ? 1 : 0,
+            module_accounts_enabled => $request->param('module_accounts_enabled') ? 1 : 0,
+            module_live_streaming_enabled => $request->param('module_live_streaming_enabled') ? 1 : 0,
+            module_forums_enabled => $request->param('module_forums_enabled') ? 1 : 0,
+            module_social_enabled => $request->param('module_social_enabled') ? 1 : 0,
+            module_notifications_enabled => $request->param('module_notifications_enabled') ? 1 : 0,
+            module_security_center_enabled => $request->param('module_security_center_enabled') ? 1 : 0,
             theme_default_mode => $request->param('theme_default_mode'),
             theme_light_preset => $request->param('theme_light_preset'),
             theme_dark_preset => $request->param('theme_dark_preset'),
@@ -14138,6 +15159,7 @@ sub _blueprint_rows {
         my $category = escape_html(DesertCMS::Blueprints::vertical_label($blueprint->{category}));
         my $default = $blueprint->{is_default} ? '<span class="status-pill ok">Default</span>' : '';
         my @modules;
+        push @modules, 'Posts' if $blueprint->{module_posts_enabled};
         push @modules, 'Map / Locations' if $blueprint->{module_map_enabled};
         push @modules, 'Showcase' if $blueprint->{module_gallery_enabled};
         push @modules, 'Shop' if $blueprint->{module_shop_enabled};
@@ -14150,6 +15172,12 @@ sub _blueprint_rows {
         push @modules, 'Newsletter' if $blueprint->{module_newsletter_enabled};
         push @modules, 'Donations' if $blueprint->{module_donations_enabled};
         push @modules, 'Testimonials' if $blueprint->{module_testimonials_enabled};
+        push @modules, 'Accounts' if $blueprint->{module_accounts_enabled} || $blueprint->{module_social_enabled};
+        push @modules, 'Live Streaming' if $blueprint->{module_live_streaming_enabled};
+        push @modules, 'Forums' if $blueprint->{module_forums_enabled};
+        push @modules, 'Social' if $blueprint->{module_social_enabled};
+        push @modules, 'Notifications' if $blueprint->{module_notifications_enabled};
+        push @modules, 'Security Center' if $blueprint->{module_security_center_enabled};
         my $modules = escape_html(@modules ? join(', ', @modules) : 'None');
         my $quotas = int($blueprint->{media_quota_mb} || 0) . ' MB, '
             . int($blueprint->{post_quota} || 0) . ' posts, '
@@ -14588,6 +15616,11 @@ sub _service_plan_feature_checkboxes {
             label => 'Public site features',
             detail => 'Primary contributor surfaces that add public pages or hosted-site workflows.',
             keys => [qw(shop events directory bookings membership newsletter donations testimonials)],
+        },
+        {
+            label => 'Accounts and community',
+            detail => 'Unified identity, community, realtime social surfaces, and notification adapters.',
+            keys => [qw(posts accounts live_streaming forums social notifications)],
         },
         {
             label => 'Payments and deposits',
@@ -15109,6 +16142,1586 @@ sub _settings_modules_save {
             ? 'Features saved and public site rebuilt.'
             : 'Modules saved and public site rebuilt.'
     );
+}
+
+sub _admin_accounts_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'accounts');
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_module_setup_nav('accounts', $session, $settings);
+    my $accounts = $self->{accounts}->list_accounts(limit => 250);
+    my $groups = $self->{accounts}->groups;
+    my $audit_events = $self->{accounts}->audit_events(limit => 50);
+    my $active = scalar grep { ($_->{status} || '') eq 'active' } @{$accounts};
+    my $moderated = scalar grep { ($_->{status} || '') eq 'moderated' || ($_->{status} || '') eq 'pending' } @{$accounts};
+    my $disabled = scalar grep { ($_->{status} || '') eq 'disabled' } @{$accounts};
+    my $identity_count = 0;
+    $identity_count += int($_->{identity_count} || 0) for @{$accounts};
+    my $summary = _settings_summary_strip(
+        [ 'Active', "<strong>$active</strong>", 'Accounts allowed to sign in.' ],
+        [ 'Moderation', "<strong>$moderated</strong>", 'Pending or moderated accounts.' ],
+        [ 'Disabled', "<strong>$disabled</strong>", 'Accounts blocked from sign-in.' ],
+        [ 'SSO identities', "<strong>$identity_count</strong>", 'Linked Google/OIDC provider subjects.' ],
+        [ 'Groups', '<strong>' . scalar(@{$groups}) . '</strong>', 'Reusable account groups for Forums, Social, Shop, and streaming.' ],
+    );
+    my $rows = $self->_admin_account_rows($accounts, $csrf);
+    my $group_rows = $self->_admin_account_group_rows($groups);
+    my $audit_rows = $self->_admin_account_audit_rows($audit_events);
+    my $section_nav = _module_section_nav(
+        'Account module sections',
+        [ '#accounts-list', 'Accounts' ],
+        [ '#accounts-create', 'Create Account' ],
+        [ '#accounts-groups', 'Groups' ],
+        [ '#accounts-sso', 'SSO' ],
+        [ '#accounts-audit', 'Audit' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">@{[_admin_feature_eyebrow($self->{config})]}</p>
+        <h1>Accounts</h1>
+        <p>Unified public identity for Shop carts, order history, Forums, Social, Live Streaming chat, notification preferences, and public profiles.</p>
+      </div>
+      <a class="button-link secondary" href="/account">Open public account</a>
+    </div>
+    $notice
+    $summary
+    $section_nav
+    <section class="inspector-panel" id="accounts-list">
+      <h2>Public Accounts</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Account</th><th>Status</th><th>Groups</th><th>SSO</th><th>Last Login</th><th>Actions</th></tr></thead>
+        <tbody>$rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel" id="accounts-create">
+      <h2>Create Account</h2>
+      <form method="post" action="/admin/accounts/create" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+          <label><span>Username</span><input name="username" autocomplete="username"></label>
+          <label><span>Display name</span><input name="display_name" autocomplete="name"></label>
+          <label><span>Status</span><select name="status">@{[_account_status_options('active')]}</select></label>
+          <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+          <label><span>Confirm password</span><input name="password_confirm" type="password" autocomplete="new-password" minlength="10" required></label>
+        </div>
+        <button type="submit">Create account</button>
+      </form>
+    </section>
+    <section class="inspector-panel" id="accounts-groups">
+      <h2>Groups</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Name</th><th>Slug</th><th>Accounts</th><th>Description</th></tr></thead>
+        <tbody>$group_rows</tbody>
+      </table>
+      <form method="post" action="/admin/accounts/groups/create" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Name</span><input name="name" required></label>
+          <label><span>Slug</span><input name="slug"></label>
+        </div>
+        <label><span>Description</span><textarea name="description" rows="3"></textarea></label>
+        <button type="submit">Create group</button>
+      </form>
+    </section>
+    <section class="inspector-panel" id="accounts-sso">
+      <h2>SSO Providers</h2>
+      <p class="muted">Local password accounts are active now. Google and generic OIDC identities are stored in <code>user_identities</code>; provider client settings are managed through the Accounts module contract before OAuth callback activation.</p>
+    </section>
+    <section class="inspector-panel" id="accounts-audit">
+      <h2>Recent Account Security Events</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Event</th><th>Account</th><th>Provider</th><th>When</th><th>Details</th></tr></thead>
+        <tbody>$audit_rows</tbody>
+      </table>
+    </section>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Accounts', $body, $session);
+}
+
+sub _admin_accounts_create {
+    my ($self, $request, $session, $session_token) = @_;
+    return $self->_admin_accounts_page($request, $session, $session_token, 'Passwords do not match.')
+        unless ($request->param('password') || '') eq ($request->param('password_confirm') || '');
+    my $account = eval {
+        $self->{accounts}->create_account(
+            email        => $request->param('email'),
+            username     => $request->param('username'),
+            display_name => $request->param('display_name'),
+            password     => $request->param('password'),
+            status       => $request->param('status') || 'active',
+        );
+    };
+    if (!$account) {
+        return $self->_admin_accounts_page($request, $session, $session_token, $@ || 'The account could not be created.');
+    }
+    $self->_audit_admin_action(
+        $session,
+        action       => 'accounts.created',
+        subject_type => 'account',
+        subject_id   => $account->{id},
+        details      => { email => $account->{email}, status => $account->{status} },
+    );
+    return $self->_admin_accounts_page($request, $session, $session_token, 'Account created.');
+}
+
+sub _admin_accounts_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $account = eval {
+        $self->{accounts}->set_status(
+            id              => $request->param('account_id'),
+            status          => $request->param('status'),
+            moderation_note => $request->param('moderation_note'),
+            admin_user_id   => $session->{user_id},
+        );
+    };
+    if (!$account) {
+        return $self->_admin_accounts_page($request, $session, $session_token, $@ || 'The account status could not be saved.');
+    }
+    $self->_audit_admin_action(
+        $session,
+        action       => 'accounts.status_saved',
+        subject_type => 'account',
+        subject_id   => $account->{id},
+        details      => { status => $account->{status} },
+    );
+    return $self->_admin_accounts_page($request, $session, $session_token, 'Account status saved.');
+}
+
+sub _admin_account_group_create {
+    my ($self, $request, $session, $session_token) = @_;
+    my $group = eval {
+        $self->{accounts}->save_group(
+            name        => $request->param('name'),
+            slug        => $request->param('slug'),
+            description => $request->param('description'),
+        );
+    };
+    if (!$group) {
+        return $self->_admin_accounts_page($request, $session, $session_token, $@ || 'The group could not be created.');
+    }
+    $self->_audit_admin_action(
+        $session,
+        action       => 'accounts.group_saved',
+        subject_type => 'account_group',
+        subject_id   => $group->{id},
+        details      => { slug => $group->{slug} },
+    );
+    return $self->_admin_accounts_page($request, $session, $session_token, 'Account group saved.');
+}
+
+sub _admin_account_rows {
+    my ($self, $accounts, $csrf) = @_;
+    my $rows = '';
+    for my $account (@{$accounts || []}) {
+        my $id = int($account->{id} || 0);
+        my $name = escape_html($account->{display_name} || $account->{username} || $account->{email});
+        my $email = escape_html($account->{email} || '');
+        my $username = escape_html($account->{username} || '');
+        my $status = escape_html($account->{status} || 'active');
+        my $groups = escape_html($account->{group_names} || 'No groups');
+        my $identity_count = int($account->{identity_count} || 0);
+        my $last_login = escape_html(_format_time($account->{last_login_at}));
+        my $note = escape_html($account->{moderation_note} || '');
+        my $options = _account_status_options($account->{status});
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Account"><strong>$name</strong><br><span class="muted">$email</span><br><code>$username</code></td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Groups">$groups</td>
+  <td data-label="SSO">$identity_count</td>
+  <td data-label="Last Login">$last_login</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/accounts/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="account_id" value="$id">
+      <select name="status">$options</select>
+      <input name="moderation_note" value="$note" placeholder="Moderation note">
+      <button type="submit" class="button-link secondary button-link--compact">Save</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(6, 'No public accounts yet.', 'Created accounts and SSO identities will appear here.');
+}
+
+sub _admin_account_group_rows {
+    my ($self, $groups) = @_;
+    my $rows = '';
+    for my $group (@{$groups || []}) {
+        my $name = escape_html($group->{name} || '');
+        my $slug = escape_html($group->{slug} || '');
+        my $description = escape_html($group->{description} || '');
+        my $count = int($group->{account_count} || 0);
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Name"><strong>$name</strong></td>
+  <td data-label="Slug"><code>$slug</code></td>
+  <td data-label="Accounts">$count</td>
+  <td data-label="Description">$description</td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(4, 'No account groups yet.', 'Groups can be reused by Forums, Social, Live Streaming chat, Shop, and notification preferences.');
+}
+
+sub _admin_account_audit_rows {
+    my ($self, $events) = @_;
+    my $rows = '';
+    for my $event (@{$events || []}) {
+        my $type = escape_html($event->{event_type} || '');
+        my $account = int($event->{account_id} || 0) || '<span class="muted">Unknown</span>';
+        $account = "#$account" if $account =~ /\A[0-9]+\z/;
+        my $provider = escape_html($event->{provider} || 'local');
+        my $when = escape_html(_format_time($event->{created_at}));
+        my $details = $event->{details} && ref($event->{details}) eq 'HASH'
+            ? join(', ', map { escape_html($_ . '=' . ($event->{details}{$_} // '')) } sort keys %{ $event->{details} })
+            : '';
+        $details ||= '<span class="muted">No details</span>';
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Event"><code>$type</code></td>
+  <td data-label="Account">$account</td>
+  <td data-label="Provider">$provider</td>
+  <td data-label="When">$when</td>
+  <td data-label="Details">$details</td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No account audit events yet.', 'Login, logout, SSO, provider link, and moderation events will appear here.');
+}
+
+sub _account_status_options {
+    my ($selected) = @_;
+    $selected = lc($selected || 'active');
+    my @options = (
+        [ active    => 'Active' ],
+        [ pending   => 'Pending' ],
+        [ moderated => 'Moderated' ],
+        [ disabled  => 'Disabled' ],
+    );
+    return join '', map {
+        my ($value, $label) = @{$_};
+        my $is_selected = $value eq $selected ? ' selected' : '';
+        '<option value="' . escape_html($value) . '"' . $is_selected . '>' . escape_html($label) . '</option>';
+    } @options;
+}
+
+sub _v3_module_admin_path {
+    my ($key) = @_;
+    return {
+        accounts       => '/admin/accounts',
+        forums         => '/admin/forums',
+        social         => '/admin/social',
+        live_streaming => '/admin/live',
+    }->{$key || ''} || '';
+}
+
+sub _admin_forums_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'forums');
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_module_setup_nav('forums', $session, $settings);
+    my $categories = $self->{forums}->categories(include_hidden => 1);
+    my $topics = $self->{forums}->latest_topics(limit => 50);
+    my $reports = $self->{forums}->reports(status => 'open');
+    my $category_rows = $self->_admin_forum_category_rows($categories, $csrf);
+    my $topic_rows = $self->_admin_forum_topic_rows($topics, $csrf);
+    my $report_rows = $self->_admin_forum_report_rows($reports, $csrf);
+    my $summary = _settings_summary_strip(
+        [ 'Categories', '<strong>' . scalar(@{$categories}) . '</strong>', 'Open, locked, hidden, account-only, and moderator-only forum areas.' ],
+        [ 'Recent topics', '<strong>' . scalar(@{$topics}) . '</strong>', 'Latest public topics across categories.' ],
+        [ 'Open reports', '<strong>' . scalar(@{$reports}) . '</strong>', 'Topic and reply reports waiting for moderator review.' ],
+        [ 'Identity', '<span class="status-pill ok">Accounts required</span>', 'Topic and reply writes use unified public accounts.' ],
+        [ 'Notifications', '<span class="status-pill status-pill--neutral">forums.*</span>', 'Topic, reply, mention, report, and moderation events flow to the central bus.' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">@{[_admin_feature_eyebrow($self->{config})]}</p>
+        <h1>Forums</h1>
+        <p>Categories, topics, replies, moderation, permissions, reporting, and notifications backed by unified Accounts.</p>
+      </div>
+      <a class="button-link secondary" href="/forums">Open forums</a>
+    </div>
+    $notice
+    $summary
+    <section class="inspector-panel">
+      <h2>Categories</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Category</th><th>Status</th><th>Visibility</th><th>Position</th><th>Topics</th><th>Posts</th><th>Actions</th></tr></thead>
+        <tbody>$category_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Create Category</h2>
+      <form method="post" action="/admin/forums/categories/create" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Title</span><input name="title" required></label>
+          <label><span>Slug</span><input name="slug"></label>
+          <label><span>Position</span><input name="position" type="number" value="100"></label>
+          <label><span>Status</span><select name="status">@{[_forum_category_status_options('open')]}</select></label>
+          <label><span>Visibility</span><select name="visibility">@{[_forum_category_visibility_options('public')]}</select></label>
+        </div>
+        <label><span>Description</span><textarea name="description" rows="3"></textarea></label>
+        <button type="submit">Create category</button>
+      </form>
+    </section>
+    <section class="inspector-panel">
+      <h2>Recent Topics</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Topic</th><th>Category</th><th>Status</th><th>Replies</th><th>Actions</th></tr></thead>
+        <tbody>$topic_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Report Queue</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Report</th><th>Target</th><th>Status</th><th>Reporter</th><th>Actions</th></tr></thead>
+        <tbody>$report_rows</tbody>
+      </table>
+    </section>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Forums', $body, $session);
+}
+
+sub _admin_forum_category_create {
+    my ($self, $request, $session, $session_token) = @_;
+    my $category = eval {
+        $self->{forums}->save_category(
+            title       => $request->param('title'),
+            slug        => $request->param('slug'),
+            description => $request->param('description'),
+            position    => $request->param('position'),
+            status      => $request->param('status'),
+            visibility  => $request->param('visibility'),
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The forum category could not be saved.') unless $category;
+    $self->_audit_admin_action($session, action => 'forums.category_saved', subject_type => 'forum_category', subject_id => $category->{id}, details => { slug => $category->{slug} });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum category saved.');
+}
+
+sub _admin_forum_category_update {
+    my ($self, $request, $session, $session_token) = @_;
+    my $existing = $self->{forums}->category_by_id($request->param('category_id'));
+    return $self->_admin_forums_page($request, $session, $session_token, 'The forum category was not found.') unless $existing;
+    my $category = eval {
+        $self->{forums}->save_category(
+            id          => $existing->{id},
+            title       => $existing->{title},
+            slug        => $existing->{slug},
+            description => $existing->{description},
+            position    => $request->param('position'),
+            status      => $request->param('status'),
+            visibility  => $request->param('visibility'),
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The forum category policy could not be saved.') unless $category;
+    $self->_audit_admin_action($session, action => 'forums.category_policy_saved', subject_type => 'forum_category', subject_id => $category->{id}, details => { status => $category->{status}, visibility => $category->{visibility}, position => int($category->{position} || 0) });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum category policy saved.');
+}
+
+sub _admin_forum_topic_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $topic = eval {
+        $self->{forums}->set_topic_status(
+            id             => $request->param('topic_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The topic status could not be saved.') unless $topic;
+    $self->_audit_admin_action($session, action => 'forums.topic_status_saved', subject_type => 'forum_topic', subject_id => $topic->{id}, details => { status => $topic->{status} });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum topic status saved.');
+}
+
+sub _admin_forum_topic_pin {
+    my ($self, $request, $session, $session_token) = @_;
+    my $topic = eval {
+        $self->{forums}->pin_topic(
+            id            => $request->param('topic_id'),
+            pinned        => $request->param('pinned') ? 1 : 0,
+            admin_user_id => $session->{user_id},
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The topic pin state could not be saved.') unless $topic;
+    $self->_audit_admin_action($session, action => 'forums.topic_pin_saved', subject_type => 'forum_topic', subject_id => $topic->{id}, details => { pinned => int($topic->{pinned} || 0) });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum topic pin state saved.');
+}
+
+sub _admin_forum_post_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $post = eval {
+        $self->{forums}->set_post_status(
+            id             => $request->param('post_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The forum reply status could not be saved.') unless $post;
+    $self->_audit_admin_action($session, action => 'forums.post_status_saved', subject_type => 'forum_post', subject_id => $post->{id}, details => { status => $post->{status} });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum reply status saved.');
+}
+
+sub _admin_forum_report_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $report = eval {
+        $self->{forums}->set_report_status(
+            id             => $request->param('report_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_forums_page($request, $session, $session_token, $@ || 'The forum report could not be updated.') unless $report;
+    $self->_audit_admin_action($session, action => 'forums.report_status_saved', subject_type => 'forum_report', subject_id => $report->{id}, details => { status => $report->{status} });
+    return $self->_admin_forums_page($request, $session, $session_token, 'Forum report status saved.');
+}
+
+sub _admin_forum_category_rows {
+    my ($self, $categories, $csrf) = @_;
+    my $rows = '';
+    for my $category (@{$categories || []}) {
+        my $id = int($category->{id} || 0);
+        my $title = escape_html($category->{title} || '');
+        my $slug = escape_html($category->{slug} || '');
+        my $status = escape_html($category->{status} || '');
+        my $visibility = escape_html($category->{visibility} || 'public');
+        my $position = int($category->{position} || 0);
+        my $topics = int($category->{topic_count} || 0);
+        my $posts = int($category->{post_count} || 0);
+        my $status_options = _forum_category_status_options($category->{status});
+        my $visibility_options = _forum_category_visibility_options($category->{visibility});
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Category"><strong>$title</strong><br><code>$slug</code></td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Visibility"><span class="status-pill status-pill--neutral">$visibility</span></td>
+  <td data-label="Position">$position</td>
+  <td data-label="Topics">$topics</td>
+  <td data-label="Posts">$posts</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/forums/categories/update" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="category_id" value="$id">
+      <select name="status">$status_options</select>
+      <select name="visibility">$visibility_options</select>
+      <input name="position" type="number" value="$position" aria-label="Position">
+      <button type="submit" class="button-link secondary button-link--compact">Save policy</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(7, 'No forum categories yet.', 'Create a category before public visitors can browse topics.');
+}
+
+sub _admin_forum_topic_rows {
+    my ($self, $topics, $csrf) = @_;
+    my $rows = '';
+    for my $topic (@{$topics || []}) {
+        my $id = int($topic->{id} || 0);
+        my $title = escape_html($topic->{title} || '');
+        my $category = escape_html($topic->{category_title} || '');
+        my $status = escape_html($topic->{status} || '');
+        my $replies = int($topic->{reply_count} || 0);
+        my $options = _forum_topic_status_options($topic->{status});
+        my $moderator_note = escape_html($topic->{moderator_note} || '');
+        my $note_html = length($moderator_note)
+            ? qq{<br><span class="muted">Moderator note: $moderator_note</span>}
+            : '';
+        my $pinned = int($topic->{pinned} || 0);
+        my $pin_badge = $pinned ? '<br><span class="status-pill ok">Pinned</span>' : '';
+        my $next_pinned = $pinned ? 0 : 1;
+        my $pin_label = $pinned ? 'Unpin' : 'Pin';
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Topic"><strong>$title</strong>$pin_badge$note_html</td>
+  <td data-label="Category">$category</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Replies">$replies</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/forums/topics/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="topic_id" value="$id">
+      <select name="status">$options</select>
+      <input name="moderator_note" value="$moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save</button>
+    </form>
+    <form method="post" action="/admin/forums/topics/pin" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="topic_id" value="$id">
+      <input type="hidden" name="pinned" value="$next_pinned">
+      <button type="submit" class="button-link secondary button-link--compact">$pin_label</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No forum topics yet.', 'Public account topics will appear here.');
+}
+
+sub _admin_forum_report_rows {
+    my ($self, $reports, $csrf) = @_;
+    my $rows = '';
+    for my $report (@{$reports || []}) {
+        my $report_id = int($report->{id} || 0);
+        my $topic_id = int($report->{topic_id} || 0);
+        my $post_id = int($report->{post_id} || 0);
+        my $status = escape_html($report->{status} || '');
+        my $reason = escape_html($report->{reason} || '');
+        my $reporter = escape_html($report->{reporter_display_name} || $report->{reporter_username} || 'Account');
+        my $target_title = escape_html($report->{topic_title} || 'Forum topic');
+        my $target_body = length($report->{post_body} || '')
+            ? _plain_text_html(substr($report->{post_body} || '', 0, 220))
+            : '<span class="muted">Topic report</span>';
+        my $report_options = _moderation_report_status_options($report->{status});
+        my $target_form = '';
+        if ($post_id > 0) {
+            my $post_options = _forum_post_status_options($report->{post_status} || 'reported');
+            $target_form = <<"HTML";
+    <form method="post" action="/admin/forums/posts/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="post_id" value="$post_id">
+      <select name="status">$post_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate reply</button>
+    </form>
+HTML
+        } elsif ($topic_id > 0) {
+            my $topic_options = _forum_topic_status_options($report->{topic_status} || 'open');
+            $target_form = <<"HTML";
+    <form method="post" action="/admin/forums/topics/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="topic_id" value="$topic_id">
+      <select name="status">$topic_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate topic</button>
+    </form>
+HTML
+        }
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Report"><strong>#$report_id</strong><br><span class="muted">$reason</span></td>
+  <td data-label="Target"><strong>$target_title</strong><br>$target_body</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Reporter">$reporter</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/forums/reports/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="report_id" value="$report_id">
+      <select name="status">$report_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save report</button>
+    </form>
+$target_form
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No forum reports yet.', 'Topic and reply reports will appear here.');
+}
+
+sub _admin_social_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'social');
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_module_setup_nav('social', $session, $settings);
+    my $profiles = $self->{social}->profiles(include_hidden => 1);
+    my $feed = $self->{social}->feed(include_hidden => 1, limit => 100);
+    my $reports = $self->{social}->reports(status => 'open');
+    my $profile_rows = $self->_admin_social_profile_rows($profiles, $csrf);
+    my $post_rows = $self->_admin_social_post_rows($feed, $csrf);
+    my $report_rows = $self->_admin_social_report_rows($reports, $csrf);
+    my $summary = _settings_summary_strip(
+        [ 'Profiles', '<strong>' . scalar(@{$profiles}) . '</strong>', 'Unified account public profiles.' ],
+        [ 'Feed posts', '<strong>' . scalar(@{$feed}) . '</strong>', 'Visible, reported, hidden, and deleted feed records.' ],
+        [ 'Open reports', '<strong>' . scalar(@{$reports}) . '</strong>', 'Post, reply, and profile reports waiting for moderator review.' ],
+        [ 'Dependency', '<span class="status-pill ok">Accounts enabled</span>', 'Social uses the unified public account table.' ],
+        [ 'Notifications', '<span class="status-pill status-pill--neutral">social.*</span>', 'Follows, mentions, reactions, reports, and moderation events emit centrally.' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">@{[_admin_feature_eyebrow($self->{config})]}</p>
+        <h1>Social</h1>
+        <p>Profiles, follows, feed posts, reactions, mentions, reporting, moderation, and notifications.</p>
+      </div>
+      <a class="button-link secondary" href="/social">Open social feed</a>
+    </div>
+    $notice
+    $summary
+    <section class="inspector-panel">
+      <h2>Profiles</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Profile</th><th>Status</th><th>Visibility</th><th>Followers</th><th>Actions</th></tr></thead>
+        <tbody>$profile_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Feed Moderation</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Post</th><th>Author</th><th>Status</th><th>Reactions</th><th>Actions</th></tr></thead>
+        <tbody>$post_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Report Queue</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Report</th><th>Target</th><th>Status</th><th>Reporter</th><th>Actions</th></tr></thead>
+        <tbody>$report_rows</tbody>
+      </table>
+    </section>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Social', $body, $session);
+}
+
+sub _admin_social_post_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $post = eval {
+        $self->{social}->set_post_status(
+            id             => $request->param('post_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_social_page($request, $session, $session_token, $@ || 'The social post status could not be saved.') unless $post;
+    $self->_audit_admin_action($session, action => 'social.post_status_saved', subject_type => 'social_post', subject_id => $post->{id}, details => { status => $post->{status} });
+    return $self->_admin_social_page($request, $session, $session_token, 'Social post status saved.');
+}
+
+sub _admin_social_reply_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $reply = eval {
+        $self->{social}->set_reply_status(
+            id             => $request->param('reply_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_social_page($request, $session, $session_token, $@ || 'The social reply status could not be saved.') unless $reply;
+    $self->_audit_admin_action($session, action => 'social.reply_status_saved', subject_type => 'social_reply', subject_id => $reply->{id}, details => { status => $reply->{status} });
+    return $self->_admin_social_page($request, $session, $session_token, 'Social reply status saved.');
+}
+
+sub _admin_social_profile_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $profile = eval {
+        $self->{social}->set_profile_status(
+            account_id     => $request->param('profile_account_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_social_page($request, $session, $session_token, $@ || 'The social profile status could not be saved.') unless $profile;
+    $self->_audit_admin_action($session, action => 'social.profile_status_saved', subject_type => 'social_profile', subject_id => $profile->{account_id}, details => { status => $profile->{status} });
+    return $self->_admin_social_page($request, $session, $session_token, 'Social profile status saved.');
+}
+
+sub _admin_social_report_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $report = eval {
+        $self->{social}->set_report_status(
+            id             => $request->param('report_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_social_page($request, $session, $session_token, $@ || 'The social report could not be updated.') unless $report;
+    $self->_audit_admin_action($session, action => 'social.report_status_saved', subject_type => 'social_report', subject_id => $report->{id}, details => { status => $report->{status} });
+    return $self->_admin_social_page($request, $session, $session_token, 'Social report status saved.');
+}
+
+sub _admin_social_profile_rows {
+    my ($self, $profiles, $csrf) = @_;
+    my $rows = '';
+    for my $profile (@{$profiles || []}) {
+        my $account_id = int($profile->{account_id} || 0);
+        my $handle = escape_html($profile->{handle} || '');
+        my $name = escape_html($profile->{display_name} || '');
+        my $status = escape_html($profile->{status} || '');
+        my $visibility = escape_html($profile->{visibility} || '');
+        my $followers = int($profile->{follower_count} || 0);
+        my $options = _social_profile_status_options($profile->{status});
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Profile"><strong>$name</strong><br><code>\@$handle</code></td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Visibility">$visibility</td>
+  <td data-label="Followers">$followers</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/social/profiles/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="profile_account_id" value="$account_id">
+      <select name="status">$options</select>
+      <input name="moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No social profiles yet.', 'Profiles are created when accounts post or save profile details.');
+}
+
+sub _admin_social_post_rows {
+    my ($self, $posts, $csrf) = @_;
+    my $rows = '';
+    for my $post (@{$posts || []}) {
+        my $id = int($post->{id} || 0);
+        my $body = escape_html(substr($post->{body} || '', 0, 160));
+        my $author = escape_html($post->{display_name} || $post->{handle} || 'Account');
+        my $status = escape_html($post->{status} || '');
+        my $reactions = int($post->{reaction_count} || 0);
+        my $options = _social_post_status_options($post->{status});
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Post">$body</td>
+  <td data-label="Author">$author</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Reactions">$reactions</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/social/posts/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="post_id" value="$id">
+      <select name="status">$options</select>
+      <input name="moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No social posts yet.', 'Feed posts and reports will appear here.');
+}
+
+sub _admin_social_report_rows {
+    my ($self, $reports, $csrf) = @_;
+    my $rows = '';
+    for my $report (@{$reports || []}) {
+        my $report_id = int($report->{id} || 0);
+        my $post_id = int($report->{post_id} || 0);
+        my $reply_id = int($report->{reply_id} || 0);
+        my $profile_account_id = int($report->{profile_account_id} || 0);
+        my $status = escape_html($report->{status} || '');
+        my $reason = escape_html($report->{reason} || '');
+        my $reporter = escape_html($report->{reporter_display_name} || $report->{reporter_username} || 'Account');
+        my ($target_label, $target_body, $target_form) = ('Social item', '', '');
+        my $report_options = _moderation_report_status_options($report->{status});
+        if ($reply_id > 0) {
+            $target_label = 'Reply';
+            $target_body = _plain_text_html(substr($report->{reply_body} || '', 0, 220));
+            my $reply_options = _social_reply_status_options($report->{reply_status} || 'reported');
+            $target_form = <<"HTML";
+    <form method="post" action="/admin/social/replies/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="reply_id" value="$reply_id">
+      <select name="status">$reply_options</select>
+      <input name="moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate reply</button>
+    </form>
+HTML
+        } elsif ($profile_account_id > 0) {
+            my $handle = escape_html($report->{profile_handle} || 'profile');
+            $target_label = 'Profile';
+            $target_body = qq{<code>\@$handle</code>};
+            my $profile_options = _social_profile_status_options($report->{profile_status} || 'active');
+            $target_form = <<"HTML";
+    <form method="post" action="/admin/social/profiles/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="profile_account_id" value="$profile_account_id">
+      <select name="status">$profile_options</select>
+      <input name="moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate profile</button>
+    </form>
+HTML
+        } elsif ($post_id > 0) {
+            $target_label = 'Post';
+            $target_body = _plain_text_html(substr($report->{post_body} || '', 0, 220));
+            my $post_options = _social_post_status_options($report->{post_status} || 'reported');
+            $target_form = <<"HTML";
+    <form method="post" action="/admin/social/posts/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="post_id" value="$post_id">
+      <select name="status">$post_options</select>
+      <input name="moderator_note" maxlength="500" placeholder="Moderator note" aria-label="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate post</button>
+    </form>
+HTML
+        }
+        my $safe_target_label = escape_html($target_label);
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Report"><strong>#$report_id</strong><br><span class="muted">$reason</span></td>
+  <td data-label="Target"><strong>$safe_target_label</strong><br>$target_body</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Reporter">$reporter</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/social/reports/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="report_id" value="$report_id">
+      <select name="status">$report_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save report</button>
+    </form>
+$target_form
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No social reports yet.', 'Post, reply, and profile reports will appear here.');
+}
+
+sub _admin_live_page {
+    my ($self, $request, $session, $session_token, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'live_streaming');
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_module_setup_nav('live_streaming', $session, $settings);
+    my $channels = $self->{live_streaming}->channels(include_disabled => 1);
+    my $channel_rows = $self->_admin_live_channel_rows($channels, $csrf);
+    my $session_rows = $self->_admin_live_session_rows($channels, $csrf);
+    my $channel_options = $self->_live_channel_options($channels);
+    my $worker_event_rows = $self->_admin_live_worker_event_rows;
+    my $chat_report_rows = $self->_admin_live_chat_report_rows($csrf);
+    my $blocked_term_rows = $self->_admin_live_blocked_term_rows($csrf);
+    my $summary = _settings_summary_strip(
+        [ 'Channels', '<strong>' . scalar(@{$channels}) . '</strong>', 'OBS-compatible channels with stream keys and HLS playback paths.' ],
+        [ 'Realtime', '<span class="status-pill status-pill--neutral">SSE/WebSocket adapter</span>', 'Presence and chat can attach to the Perl realtime service.' ],
+        [ 'Security', '<span class="status-pill status-pill--neutral">Stream keys hashed</span>', 'Raw stream keys are only shown at creation or rotation.' ],
+        [ 'SubCMS Gates', '<span class="status-pill status-pill--neutral">streaming_ports</span>', 'Plans can gate streaming storage, chat, and exposed ports.' ],
+    );
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">@{[_admin_feature_eyebrow($self->{config})]}</p>
+        <h1>Live Streaming</h1>
+        <p>OBS-compatible ingest planning, HLS playback, stream keys, schedules, live chat, moderation, and SubCMS gates.</p>
+      </div>
+      <a class="button-link secondary" href="/live">Open live page</a>
+    </div>
+    $notice
+    $summary
+    <section class="inspector-panel">
+      <h2>Channels</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Channel</th><th>Status</th><th>HLS Path</th><th>Chat</th><th>Sessions</th><th>Key</th></tr></thead>
+        <tbody>$channel_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Create Channel</h2>
+      <form method="post" action="/admin/live/channels/create" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Title</span><input name="title" required></label>
+          <label><span>Slug</span><input name="slug"></label>
+          <label><span>HLS path</span><input name="hls_path" placeholder="/streams/channel/index.m3u8"></label>
+          <label class="checkbox-field"><input type="checkbox" name="chat_enabled" value="1" checked><span>Enable live chat</span></label>
+        </div>
+        <label><span>Description</span><textarea name="description" rows="3"></textarea></label>
+        <button type="submit">Create channel</button>
+      </form>
+    </section>
+    <section class="inspector-panel">
+      <div class="split">
+        <h2>Sessions</h2>
+        <form method="post" action="/admin/live/sessions/due" class="inline-form">
+          <input type="hidden" name="csrf_token" value="$csrf">
+          <button type="submit" class="button-link secondary button-link--compact">Notify due sessions</button>
+        </form>
+      </div>
+      <form method="post" action="/admin/live/sessions/create" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Channel</span><select name="channel_id">$channel_options</select></label>
+          <label><span>Title</span><input name="title"></label>
+          <label><span>Scheduled time UTC</span><input name="scheduled_at" type="datetime-local" value="@{[escape_html(_admin_datetime_value(now() + 3600, 'UTC'))]}"></label>
+        </div>
+        <button type="submit">Schedule session</button>
+      </form>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Session</th><th>Channel</th><th>Status</th><th>Scheduled</th><th>Started</th><th>Actions</th></tr></thead>
+        <tbody>$session_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Worker Events</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Event</th><th>Worker</th><th>Channel</th><th>Status</th><th>Log</th></tr></thead>
+        <tbody>$worker_event_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Chat Moderation</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Report</th><th>Message</th><th>Status</th><th>Channel</th><th>Actions</th></tr></thead>
+        <tbody>$chat_report_rows</tbody>
+      </table>
+    </section>
+    <section class="inspector-panel">
+      <h2>Blocked Terms</h2>
+      <form method="post" action="/admin/live/blocked-terms/save" class="settings-form settings-form--wide">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <div class="settings-grid settings-grid--two">
+          <label><span>Term</span><input name="term" maxlength="120" required></label>
+          <label><span>Action</span><select name="action">@{[_live_blocked_term_action_options('report')]}</select></label>
+        </div>
+        <button type="submit">Save blocked term</button>
+      </form>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Term</th><th>Action</th><th>Updated</th><th>Delete</th></tr></thead>
+        <tbody>$blocked_term_rows</tbody>
+      </table>
+    </section>
+  </section>
+</section>
+HTML
+    return $self->_html_response('Live Streaming', $body, $session);
+}
+
+sub _admin_live_channel_create {
+    my ($self, $request, $session, $session_token) = @_;
+    my $channel = eval {
+        $self->{live_streaming}->create_channel(
+            title        => $request->param('title'),
+            slug         => $request->param('slug'),
+            description  => $request->param('description'),
+            hls_path     => $request->param('hls_path'),
+            chat_enabled => $request->param('chat_enabled') ? 1 : 0,
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The live channel could not be created.') unless $channel;
+    $self->_audit_admin_action($session, action => 'live.channel_created', subject_type => 'live_stream_channel', subject_id => $channel->{id}, details => { slug => $channel->{slug} });
+    my $key = $channel->{stream_key} || '';
+    return $self->_admin_live_page($request, $session, $session_token, "Live channel created. Stream key: $key");
+}
+
+sub _admin_live_session_create {
+    my ($self, $request, $session, $session_token) = @_;
+    my $stream_session = eval {
+        $self->{live_streaming}->save_session(
+            channel_id   => $request->param('channel_id'),
+            title        => $request->param('title'),
+            status       => 'scheduled',
+            scheduled_at => _admin_parse_datetime_value($request->param('scheduled_at'), 'UTC'),
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The live session could not be scheduled.') unless $stream_session;
+    $self->_audit_admin_action($session, action => 'live.session_saved', subject_type => 'live_stream_session', subject_id => $stream_session->{id}, details => { status => $stream_session->{status} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Live session scheduled.');
+}
+
+sub _admin_live_channel_key_rotate {
+    my ($self, $request, $session, $session_token) = @_;
+    my $channel = eval { $self->{live_streaming}->rotate_stream_key($request->param('channel_id')) };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The stream key could not be rotated.') unless $channel;
+    $self->_audit_admin_action($session, action => 'live.stream_key_rotated', subject_type => 'live_stream_channel', subject_id => $channel->{id}, details => { slug => $channel->{slug} });
+    my $key = $channel->{stream_key} || '';
+    return $self->_admin_live_page($request, $session, $session_token, "Stream key rotated. New stream key: $key");
+}
+
+sub _admin_live_channel_key_revoke {
+    my ($self, $request, $session, $session_token) = @_;
+    my $channel = eval { $self->{live_streaming}->revoke_stream_key($request->param('channel_id')) };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The stream key could not be revoked.') unless $channel;
+    $self->_audit_admin_action($session, action => 'live.stream_key_revoked', subject_type => 'live_stream_channel', subject_id => $channel->{id}, details => { slug => $channel->{slug} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Stream key revoked. Rotate the key before the next OBS ingest.');
+}
+
+sub _admin_live_session_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $stream_session = eval {
+        $self->{live_streaming}->set_session_status(
+            id               => $request->param('session_id'),
+            status           => $request->param('status'),
+            admin_user_id    => $session->{user_id},
+            realtime_publish => $self->_realtime_publish_adapter,
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The live session status could not be saved.') unless $stream_session;
+    $self->_audit_admin_action($session, action => 'live.session_status_saved', subject_type => 'live_stream_session', subject_id => $stream_session->{id}, details => { status => $stream_session->{status} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Live session status saved.');
+}
+
+sub _admin_live_sessions_due {
+    my ($self, $request, $session, $session_token) = @_;
+    my $emitted = eval { $self->{live_streaming}->emit_schedule_due_notifications(now => now()) };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'Due session notifications could not be checked.') unless $emitted;
+    my $count = scalar(@{$emitted || []});
+    $self->_audit_admin_action($session, action => 'live.sessions_due_checked', subject_type => 'live_stream_session', details => { notifications => $count });
+    return $self->_admin_live_page($request, $session, $session_token, "$count due session notification(s) queued.");
+}
+
+sub _admin_live_chat_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $message = eval {
+        $self->{live_streaming}->set_chat_status(
+            id               => $request->param('message_id'),
+            status           => $request->param('status'),
+            moderator_note   => $request->param('moderator_note'),
+            admin_user_id    => $session->{user_id},
+            realtime_publish => $self->_realtime_publish_adapter,
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The live chat message could not be moderated.') unless $message;
+    $self->_audit_admin_action($session, action => 'live.chat_status_saved', subject_type => 'live_chat_message', subject_id => $message->{id}, details => { status => $message->{status} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Live chat message status saved.');
+}
+
+sub _admin_live_chat_report_status {
+    my ($self, $request, $session, $session_token) = @_;
+    my $report = eval {
+        $self->{live_streaming}->set_chat_report_status(
+            id             => $request->param('report_id'),
+            status         => $request->param('status'),
+            moderator_note => $request->param('moderator_note'),
+            admin_user_id  => $session->{user_id},
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The live chat report could not be updated.') unless $report;
+    $self->_audit_admin_action($session, action => 'live.chat_report_status_saved', subject_type => 'live_chat_report', subject_id => $report->{id}, details => { status => $report->{status} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Live chat report status saved.');
+}
+
+sub _admin_live_blocked_term_save {
+    my ($self, $request, $session, $session_token) = @_;
+    my $term = eval {
+        $self->{live_streaming}->save_blocked_term(
+            term   => $request->param('term'),
+            action => $request->param('action'),
+        );
+    };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The blocked term could not be saved.') unless $term;
+    $self->_audit_admin_action($session, action => 'live.blocked_term_saved', subject_type => 'live_chat_blocked_term', subject_id => $term->{id}, details => { term => $term->{term}, action => $term->{action} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Blocked term saved.');
+}
+
+sub _admin_live_blocked_term_delete {
+    my ($self, $request, $session, $session_token) = @_;
+    my $term = eval { $self->{live_streaming}->delete_blocked_term(id => $request->param('term_id')) };
+    return $self->_admin_live_page($request, $session, $session_token, $@ || 'The blocked term could not be deleted.') unless $term;
+    $self->_audit_admin_action($session, action => 'live.blocked_term_deleted', subject_type => 'live_chat_blocked_term', subject_id => $term->{id}, details => { term => $term->{term}, action => $term->{action} });
+    return $self->_admin_live_page($request, $session, $session_token, 'Blocked term deleted.');
+}
+
+sub _admin_live_channel_rows {
+    my ($self, $channels, $csrf) = @_;
+    my $rows = '';
+    for my $channel (@{$channels || []}) {
+        my $id = int($channel->{id} || 0);
+        my $title = escape_html($channel->{title} || '');
+        my $slug = escape_html($channel->{slug} || '');
+        my $status = escape_html($channel->{status} || '');
+        my $hls = escape_html($channel->{hls_path} || '');
+        my $chat = $channel->{chat_enabled} ? 'Enabled' : 'Disabled';
+        my $sessions = int($channel->{session_count} || 0);
+        my $revoked = $channel->{stream_key_revoked_at} ? '<span class="status-pill warn">Revoked</span>' : '<span class="status-pill ok">Active hash</span>';
+        my $actions = <<"HTML";
+<div class="button-row">
+  <form method="post" action="/admin/live/channels/key/rotate" class="inline-form">
+    <input type="hidden" name="csrf_token" value="$csrf">
+    <input type="hidden" name="channel_id" value="$id">
+    <button type="submit" class="button-link secondary button-link--compact">Rotate</button>
+  </form>
+  <form method="post" action="/admin/live/channels/key/revoke" class="inline-form">
+    <input type="hidden" name="csrf_token" value="$csrf">
+    <input type="hidden" name="channel_id" value="$id">
+    <button type="submit" class="button-link secondary button-link--compact button-link--warn">Revoke</button>
+  </form>
+</div>
+HTML
+        $rows .= qq{<tr><td data-label="Channel"><strong>$title</strong><br><code>$slug</code></td><td data-label="Status"><span class="status-pill">$status</span></td><td data-label="HLS Path"><code>$hls</code></td><td data-label="Chat">$chat</td><td data-label="Sessions">$sessions</td><td data-label="Key">$revoked$actions</td></tr>};
+    }
+    return $rows || _admin_empty_row(6, 'No live channels yet.', 'Create a channel to generate a stream key and HLS playback path.');
+}
+
+sub _admin_live_session_rows {
+    my ($self, $channels, $csrf) = @_;
+    my $rows = '';
+    for my $channel (@{$channels || []}) {
+        for my $stream_session (@{ $self->{live_streaming}->sessions_for_channel($channel->{id}, limit => 10) }) {
+            my $id = int($stream_session->{id} || 0);
+            my $title = escape_html($stream_session->{title} || 'Untitled session');
+            my $channel_title = escape_html($channel->{title} || '');
+            my $status = escape_html($stream_session->{status} || '');
+            my $scheduled = escape_html(_format_time($stream_session->{scheduled_at}));
+            my $started = escape_html(_format_time($stream_session->{started_at}));
+            my $options = _live_session_status_options($stream_session->{status});
+            $rows .= <<"HTML";
+<tr>
+  <td data-label="Session">$title</td>
+  <td data-label="Channel">$channel_title</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Scheduled">$scheduled</td>
+  <td data-label="Started">$started</td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/live/sessions/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="session_id" value="$id">
+      <select name="status">$options</select>
+      <button type="submit" class="button-link secondary button-link--compact">Save</button>
+    </form>
+  </td>
+</tr>
+HTML
+        }
+    }
+    return $rows || _admin_empty_row(6, 'No live sessions yet.', 'Scheduled and live stream sessions will appear here.');
+}
+
+sub _admin_live_chat_report_rows {
+    my ($self, $csrf) = @_;
+    my $rows = '';
+    for my $report (@{ $self->{live_streaming}->chat_reports(limit => 50) }) {
+        my $report_id = int($report->{id} || 0);
+        my $message_id = int($report->{message_id} || 0);
+        my $status = escape_html($report->{status} || '');
+        my $channel = escape_html($report->{channel_slug} || '');
+        my $session = escape_html($report->{session_title} || '');
+        my $reason = escape_html($report->{reason} || '');
+        my $body = _plain_text_html($report->{body});
+        my $report_options = _live_chat_report_status_options($report->{status});
+        my $message_options = _live_chat_message_status_options($report->{message_status} || 'reported');
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Report"><strong>#$report_id</strong><br><span class="muted">$reason</span></td>
+  <td data-label="Message">$body</td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="Channel"><code>$channel</code><br><span class="muted">$session</span></td>
+  <td data-label="Actions">
+    <form method="post" action="/admin/live/chat/reports/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="report_id" value="$report_id">
+      <select name="status">$report_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Save report</button>
+    </form>
+    <form method="post" action="/admin/live/chat/status" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="message_id" value="$message_id">
+      <select name="status">$message_options</select>
+      <input name="moderator_note" placeholder="Moderator note">
+      <button type="submit" class="button-link secondary button-link--compact">Moderate message</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No live chat reports yet.', 'Reported chat messages and blocked-term matches will appear here.');
+}
+
+sub _admin_live_blocked_term_rows {
+    my ($self, $csrf) = @_;
+    my $rows = '';
+    for my $term (@{ $self->{live_streaming}->blocked_terms }) {
+        my $id = int($term->{id} || 0);
+        my $safe_term = escape_html($term->{term} || '');
+        my $action = escape_html($term->{action} || 'report');
+        my $updated = escape_html(_format_time($term->{updated_at}));
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Term"><code>$safe_term</code></td>
+  <td data-label="Action"><span class="status-pill">$action</span></td>
+  <td data-label="Updated">$updated</td>
+  <td data-label="Delete">
+    <form method="post" action="/admin/live/blocked-terms/delete" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="term_id" value="$id">
+      <button type="submit" class="button-link secondary button-link--compact button-link--warn">Delete</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(4, 'No blocked terms yet.', 'Terms added here can report, hide, or reject live chat messages.');
+}
+
+sub _admin_live_worker_event_rows {
+    my ($self) = @_;
+    my $rows = '';
+    for my $event (@{ $self->{live_streaming}->worker_events(limit => 50) }) {
+        my $id = int($event->{id} || 0);
+        my $type = escape_html($event->{event_type} || '');
+        my $created = escape_html(_format_time($event->{created_at}));
+        my $worker = escape_html($event->{worker_id} || '-');
+        my $channel = escape_html($event->{channel_slug} || '');
+        my $session = escape_html($event->{session_title} || '');
+        my $status = escape_html($event->{status} || '');
+        my $viewer_count = int($event->{viewer_count} || 0);
+        my $hls = escape_html($event->{hls_output_path} || '');
+        my $message = _plain_text_html($event->{message} || '');
+        my $log_line = escape_html($event->{log_line} || '');
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Event"><strong>#$id</strong><br><code>$type</code><br><span class="muted">$created</span></td>
+  <td data-label="Worker"><code>$worker</code></td>
+  <td data-label="Channel"><code>$channel</code><br><span class="muted">$session</span></td>
+  <td data-label="Status"><span class="status-pill">$status</span><br><span class="muted">$viewer_count viewers</span><br><code>$hls</code></td>
+  <td data-label="Log">$message<br><code>$log_line</code></td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No worker events yet.', 'Worker auth, rejected ingest attempts, and heartbeat log lines will appear here.');
+}
+
+sub _live_channel_options {
+    my ($self, $channels) = @_;
+    my $html = '';
+    for my $channel (@{$channels || []}) {
+        next if ($channel->{status} || '') eq 'disabled';
+        my $id = int($channel->{id} || 0);
+        my $title = escape_html($channel->{title} || "Channel $id");
+        $html .= qq{<option value="$id">$title</option>};
+    }
+    return $html || '<option value="">Create a channel first</option>';
+}
+
+sub _forum_category_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ open => 'Open' ], [ locked => 'Locked' ], [ hidden => 'Hidden' ]);
+}
+
+sub _forum_category_visibility_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ public => 'Public' ], [ accounts => 'Accounts only' ], [ moderators => 'Moderators only' ]);
+}
+
+sub _forum_topic_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ open => 'Open' ], [ locked => 'Locked' ], [ hidden => 'Hidden' ], [ deleted => 'Deleted' ]);
+}
+
+sub _social_post_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ visible => 'Visible' ], [ reported => 'Reported' ], [ hidden => 'Hidden' ], [ deleted => 'Deleted' ]);
+}
+
+sub _forum_post_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ visible => 'Visible' ], [ reported => 'Reported' ], [ hidden => 'Hidden' ], [ deleted => 'Deleted' ]);
+}
+
+sub _social_reply_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ visible => 'Visible' ], [ reported => 'Reported' ], [ hidden => 'Hidden' ], [ deleted => 'Deleted' ]);
+}
+
+sub _social_profile_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ active => 'Active' ], [ moderated => 'Moderated' ], [ disabled => 'Disabled' ]);
+}
+
+sub _moderation_report_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ open => 'Open' ], [ reviewed => 'Reviewed' ], [ dismissed => 'Dismissed' ], [ actioned => 'Actioned' ]);
+}
+
+sub _live_session_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ scheduled => 'Scheduled' ], [ live => 'Live' ], [ ended => 'Ended' ], [ failed => 'Failed' ]);
+}
+
+sub _live_chat_message_status_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ hidden => 'Hidden' ], [ deleted => 'Deleted' ], [ reported => 'Reported' ], [ visible => 'Visible' ]);
+}
+
+sub _live_chat_report_status_options {
+    my ($selected) = @_;
+    return _moderation_report_status_options($selected);
+}
+
+sub _live_blocked_term_action_options {
+    my ($selected) = @_;
+    return _status_select_options($selected, [ report => 'Report' ], [ hide => 'Hide' ], [ reject => 'Reject' ]);
+}
+
+sub _status_select_options {
+    my ($selected, @options) = @_;
+    $selected = lc($selected || '');
+    return join '', map {
+        my ($value, $label) = @{$_};
+        my $is_selected = $value eq $selected ? ' selected' : '';
+        '<option value="' . escape_html($value) . '"' . $is_selected . '>' . escape_html($label) . '</option>';
+    } @options;
+}
+
+sub _v3_module_settings_page {
+    my ($self, $request, $session, $session_token, $key, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $manifest = DesertCMS::ModuleManifest::manifest($key, settings => $settings, config => $self->{config});
+    return $self->_not_found unless $manifest;
+    my $csrf = $self->{auth}->csrf_token($session_token);
+    my $module = $self->_module_feature_state($settings, $key);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $settings_nav = $self->_module_setup_nav($key, $session, $settings);
+    my $feature_eyebrow = _admin_feature_eyebrow($self->{config});
+    my $safe_label = escape_html($manifest->{label} || $key);
+    my $safe_description = escape_html($manifest->{description} || '');
+    my $public_path = length($manifest->{public_path} || '') ? '<code>' . escape_html($manifest->{public_path}) . '</code>' : '<span class="muted">Admin only</span>';
+    my $settings_path = length($manifest->{settings_path} || '') ? '<code>' . escape_html($manifest->{settings_path}) . '</code>' : '<span class="muted">Manifest only</span>';
+    my $admin_path = $module && $module->{enabled} ? _v3_module_admin_path($key) : '';
+    my $admin_link = length $admin_path
+        ? '<a class="button-link secondary" href="' . escape_html($admin_path) . '">Open management</a>'
+        : '';
+    my $status = _module_status_html($module, $self->{config});
+    my $path_key = $key;
+    $path_key =~ s/_/-/g;
+    my $toggle = '';
+    if ($module && length($module->{setting_key} || '')) {
+        $toggle = _module_toggle_control($module, $module->{setting_key}, 'Enable ' . ($manifest->{label} || $key), $self->{config});
+    }
+    my $dependency_note = '';
+    if ($key eq 'social') {
+        $dependency_note = '<p class="notice">Social depends on Accounts. Saving Social as enabled also enables Accounts so public identity stays unified.</p>';
+    } elsif ($key eq 'accounts' && DesertCMS::Modules::enabled($settings, 'social')) {
+        $dependency_note = '<p class="notice">Accounts is effectively enabled because Social is enabled.</p>';
+    }
+    my $routes = _manifest_object_list($manifest->{routes}, [qw(scope method path)], 'No routes registered.');
+    my $content_types = _manifest_object_list($manifest->{content_types}, [qw(key label table discriminator)], 'No content types registered.');
+    my $widgets = _manifest_object_list($manifest->{widgets}, [qw(key label size capability)], 'No dashboard widgets registered.');
+    my $analytics = _manifest_object_list($manifest->{analytics_panels}, [qw(key label source views ranges)], 'No analytics panels registered.');
+    my $notifications = _manifest_value_list($manifest->{notifications}, 'No notification topics registered.');
+    my $checks = _manifest_value_list($manifest->{security_checks}, 'No security checks registered.');
+    my $migrations = _manifest_value_list($manifest->{migrations}, 'No migrations registered.');
+    my $permissions = _manifest_value_list($manifest->{permissions}, 'No permissions registered.');
+    my $gates = _manifest_value_list($manifest->{subcms_plan_gates}, 'No SubCMS gates registered.');
+    my $extra_settings = $self->_v3_module_extra_settings($key, $settings);
+    my @validation_errors = DesertCMS::ModuleManifest::validate_manifest($manifest);
+    my $contract_status = @validation_errors
+        ? '<span class="status-pill warn">Contract warnings</span>'
+        : '<span class="status-pill ok">Contract valid</span>';
+    my $contract_detail = @validation_errors
+        ? _manifest_value_list(\@validation_errors, 'No warnings.')
+        : '<p class="muted">This module satisfies the v3 manifest contract.</p>';
+    my $response_title = ($manifest->{label} || $key) . (DesertCMS::CapabilityPolicy::contributor_product_mode($self->{config}) ? ' Feature' : ' Module');
+    my @section_nav_items = (
+        [ '#v3-module-status', 'Status' ],
+        [ '#v3-module-contract', 'Contract' ],
+        [ '#v3-module-surfaces', 'Surfaces' ],
+        [ '#v3-module-security', 'Security' ],
+    );
+    splice @section_nav_items, 1, 0, [ '#v3-module-provider-settings', 'Providers' ] if length $extra_settings;
+    my $section_nav = _module_section_nav("$safe_label setup sections", @section_nav_items);
+
+    my $body = <<"HTML";
+<section class="editor-workspace">
+  $settings_nav
+  <section class="panel">
+    <div class="split">
+      <div>
+        <p class="eyebrow">$feature_eyebrow</p>
+        <h1>$safe_label</h1>
+        <p>$safe_description</p>
+      </div>
+      $contract_status
+    </div>
+    $notice
+    $dependency_note
+    $section_nav
+    <form method="post" action="/admin/settings/modules/$path_key/save" class="settings-form settings-form--wide">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <section class="inspector-panel" id="v3-module-status">
+        <h2>Status</h2>
+        <dl class="health-list health-list--compact">
+          <div><dt>Module status</dt><dd>$status</dd></div>
+          <div><dt>Public path</dt><dd>$public_path</dd></div>
+          <div><dt>Settings path</dt><dd>$settings_path</dd></div>
+          <div><dt>Manifest type</dt><dd><code>@{[escape_html($manifest->{type} || 'module')]}</code></dd></div>
+        </dl>
+        $toggle
+        $admin_link
+      </section>
+      $extra_settings
+      <section class="inspector-panel" id="v3-module-contract">
+        <h2>Contract</h2>
+        $contract_detail
+        <div class="v3-contract-grid">
+          <div><h3>Migrations</h3>$migrations</div>
+          <div><h3>Permissions</h3>$permissions</div>
+          <div><h3>SubCMS Gates</h3>$gates</div>
+        </div>
+      </section>
+      <section class="inspector-panel" id="v3-module-surfaces">
+        <h2>Surfaces</h2>
+        <div class="v3-contract-grid">
+          <div><h3>Routes</h3>$routes</div>
+          <div><h3>Content Types</h3>$content_types</div>
+          <div><h3>Dashboard Widgets</h3>$widgets</div>
+          <div><h3>Analytics Panels</h3>$analytics</div>
+          <div><h3>Notifications</h3>$notifications</div>
+        </div>
+      </section>
+      <section class="inspector-panel" id="v3-module-security">
+        <h2>Security Checks</h2>
+        $checks
+      </section>
+      <button type="submit">Save $safe_label</button>
+    </form>
+  </section>
+</section>
+HTML
+    return $self->_html_response($response_title, $body, $session);
+}
+
+sub _v3_module_settings_save {
+    my ($self, $request, $session, $session_token, $key) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $module = $self->_module_feature_state($settings, $key);
+    return $self->_not_found unless $module && length($module->{setting_key} || '');
+    my %values = (
+        $module->{setting_key} => _module_toggle_value($module, $request, $module->{setting_key}),
+    );
+    $values{module_accounts_enabled} = 1
+        if $key eq 'social' && $values{module_social_enabled};
+    $values{module_social_enabled} = 0
+        if $key eq 'accounts' && !$values{module_accounts_enabled} && DesertCMS::Modules::enabled($settings, 'social');
+    if ($key eq 'accounts') {
+        my $google_secret = $request->param('accounts_google_client_secret');
+        $google_secret = ''
+            if $request->param('accounts_google_secret_clear');
+        $google_secret = $settings->{accounts_google_client_secret}
+            if !$request->param('accounts_google_secret_clear')
+                && (!defined($google_secret) || $google_secret eq '')
+                && length($settings->{accounts_google_client_secret} || '');
+        my $oidc_secret = $request->param('accounts_oidc_client_secret');
+        $oidc_secret = ''
+            if $request->param('accounts_oidc_secret_clear');
+        $oidc_secret = $settings->{accounts_oidc_client_secret}
+            if !$request->param('accounts_oidc_secret_clear')
+                && (!defined($oidc_secret) || $oidc_secret eq '')
+                && length($settings->{accounts_oidc_client_secret} || '');
+        $values{accounts_google_enabled} = $request->param('accounts_google_enabled') ? 1 : 0;
+        $values{accounts_google_client_id} = $request->param('accounts_google_client_id') || '';
+        $values{accounts_google_client_secret} = $google_secret || '';
+        $values{accounts_oidc_enabled} = $request->param('accounts_oidc_enabled') ? 1 : 0;
+        $values{accounts_oidc_discovery_url} = $request->param('accounts_oidc_discovery_url') || '';
+        $values{accounts_oidc_client_id} = $request->param('accounts_oidc_client_id') || '';
+        $values{accounts_oidc_client_secret} = $oidc_secret || '';
+        my $allowed_domains = eval { DesertCMS::Accounts::normalize_allowed_domains($request->param('accounts_allowed_domains')) };
+        return $self->_v3_module_settings_page($request, $session, $session_token, $key, 'Accounts SSO settings were not saved: ' . ($@ || 'allowed domains are invalid.'))
+            unless defined $allowed_domains;
+        $values{accounts_allowed_domains} = $allowed_domains;
+    }
+    DesertCMS::Settings::set_many($self->{config}, $self->{db}, \%values);
+    my %audit_values = %values;
+    for my $secret_key (qw(accounts_google_client_secret accounts_oidc_client_secret)) {
+        next unless exists $audit_values{$secret_key};
+        $audit_values{$secret_key} = length($audit_values{$secret_key} || '') ? '[redacted]' : '';
+    }
+    $self->_audit_admin_action(
+        $session,
+        action       => 'settings.v3_module_saved',
+        subject_type => 'module',
+        subject_id   => $key,
+        details      => \%audit_values,
+    );
+    return $self->_v3_module_settings_page($request, $session, $session_token, $key, 'Module settings saved.');
+}
+
+sub _v3_module_extra_settings {
+    my ($self, $key, $settings) = @_;
+    return '' unless $key eq 'accounts';
+    my $google_enabled = _setting_truthy($settings->{accounts_google_enabled}) ? 'checked' : '';
+    my $google_client_id = escape_html($settings->{accounts_google_client_id} || '');
+    my $google_placeholder = length($settings->{accounts_google_client_secret} || '') ? 'Stored secret unchanged' : 'Not configured';
+    my $oidc_enabled = _setting_truthy($settings->{accounts_oidc_enabled}) ? 'checked' : '';
+    my $oidc_discovery = escape_html($settings->{accounts_oidc_discovery_url} || '');
+    my $oidc_client_id = escape_html($settings->{accounts_oidc_client_id} || '');
+    my $oidc_placeholder = length($settings->{accounts_oidc_client_secret} || '') ? 'Stored secret unchanged' : 'Not configured';
+    my $allowed_domains = escape_html($settings->{accounts_allowed_domains} || '');
+    my $google_callback = escape_html($self->_absolute_url('/account/sso/google/callback'));
+    my $oidc_callback = escape_html($self->_absolute_url('/account/sso/oidc/callback'));
+    my $provider_readiness = _v3_accounts_provider_readiness_html(
+        DesertCMS::Accounts::oauth_provider_readiness(provider => 'google', settings => $settings, redirect_uri => $self->_account_sso_redirect_uri('google')),
+        DesertCMS::Accounts::oauth_provider_readiness(provider => 'oidc', settings => $settings, redirect_uri => $self->_account_sso_redirect_uri('oidc')),
+    );
+    return <<"HTML";
+      <section class="inspector-panel" id="v3-module-provider-settings">
+        <h2>Provider SSO</h2>
+        <p class="muted">Accounts supports local sign-in plus Google and generic OIDC authorization-code providers. Callback URLs must be registered with the provider and served over HTTPS.</p>
+        $provider_readiness
+        <label><span>Allowed email domains</span><input name="accounts_allowed_domains" value="$allowed_domains" placeholder="example.com, *.example.org"><small>Leave blank to allow any verified provider email domain.</small></label>
+        <div class="v3-provider-grid">
+          <fieldset>
+            <legend>Google</legend>
+            <label class="checkbox-field"><input type="checkbox" name="accounts_google_enabled" value="1" $google_enabled><span>Enable Google sign-in</span></label>
+            <label><span>Client ID</span><input name="accounts_google_client_id" value="$google_client_id" autocomplete="off"></label>
+            <label><span>Client secret</span><input type="password" name="accounts_google_client_secret" value="" placeholder="$google_placeholder" autocomplete="new-password"></label>
+            <label class="checkbox-field"><input type="checkbox" name="accounts_google_secret_clear" value="1"><span>Clear stored Google secret</span></label>
+            <label><span>Callback URL</span><input value="$google_callback" readonly></label>
+          </fieldset>
+          <fieldset>
+            <legend>OIDC</legend>
+            <label class="checkbox-field"><input type="checkbox" name="accounts_oidc_enabled" value="1" $oidc_enabled><span>Enable OIDC sign-in</span></label>
+            <label><span>Discovery URL</span><input name="accounts_oidc_discovery_url" type="url" value="$oidc_discovery" placeholder="https://idp.example.com/.well-known/openid-configuration"></label>
+            <label><span>Client ID</span><input name="accounts_oidc_client_id" value="$oidc_client_id" autocomplete="off"></label>
+            <label><span>Client secret</span><input type="password" name="accounts_oidc_client_secret" value="" placeholder="$oidc_placeholder" autocomplete="new-password"></label>
+            <label class="checkbox-field"><input type="checkbox" name="accounts_oidc_secret_clear" value="1"><span>Clear stored OIDC secret</span></label>
+            <label><span>Callback URL</span><input value="$oidc_callback" readonly></label>
+          </fieldset>
+        </div>
+      </section>
+HTML
+}
+
+sub _v3_accounts_provider_readiness_html {
+    my (@providers) = @_;
+    my $html = '<dl class="health-list health-list--compact fleet-provider-list">';
+    for my $provider (@providers) {
+        my $label = escape_html($provider->{label} || 'Provider');
+        my $pill = _fleet_state_pill($provider->{state}, $provider->{status});
+        my $summary = escape_html($provider->{summary} || '');
+        my $callback = escape_html($provider->{callback_url} || '');
+        my $issue_html = '';
+        if (@{ $provider->{issues} || [] }) {
+            $issue_html = '<ul class="provider-check-list">'
+                . join('', map { '<li>' . escape_html($_) . '</li>' } @{ $provider->{issues} || [] })
+                . '</ul>';
+        }
+        my $callback_html = length $callback ? '<small>Callback: <code>' . $callback . '</code></small>' : '';
+        $html .= <<"HTML";
+          <div><dt>$label</dt><dd>$pill<small>$summary</small>$callback_html$issue_html</dd></div>
+HTML
+    }
+    $html .= '</dl>';
+    return $html;
 }
 
 sub _module_feature_state {
@@ -18257,6 +20870,1876 @@ sub _dispatch_members {
     return $self->_not_found;
 }
 
+sub _dispatch_accounts {
+    my ($self, $request) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'accounts');
+
+    my $path = $request->{path} || '/account';
+    $path =~ s{/+\z}{};
+    $path = '/account' if $path eq '';
+
+    if ($path eq '/account') {
+        return $request->{method} eq 'GET' ? $self->_account_home($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/login') {
+        return $request->{method} eq 'POST' ? $self->_account_login_post($request) : $self->_account_login_get($request);
+    }
+    if ($path eq '/account/password/forgot') {
+        return $request->{method} eq 'POST' ? $self->_account_forgot_password_post($request) : $self->_account_forgot_password_get($request);
+    }
+    if ($path =~ m{\A/account/password/reset/([0-9a-fA-F]{64})\z}) {
+        my $token = lc $1;
+        return $request->{method} eq 'POST' ? $self->_account_password_reset_post($request, $token) : $self->_account_password_reset_get($request, $token);
+    }
+    if ($path eq '/account/sso/google/start') {
+        return $request->{method} eq 'GET' ? $self->_account_sso_start($request, 'google') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/sso/google/callback') {
+        return $request->{method} eq 'GET' ? $self->_account_sso_callback($request, 'google') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/sso/oidc/start') {
+        return $request->{method} eq 'GET' ? $self->_account_sso_start($request, 'oidc') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/sso/oidc/callback') {
+        return $request->{method} eq 'GET' ? $self->_account_sso_callback($request, 'oidc') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/identity/google/start') {
+        return $request->{method} eq 'GET' ? $self->_account_identity_start($request, 'google') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/identity/oidc/start') {
+        return $request->{method} eq 'GET' ? $self->_account_identity_start($request, 'oidc') : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/identity/unlink') {
+        return $request->{method} eq 'POST' ? $self->_account_identity_unlink_post($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/logout') {
+        return $request->{method} eq 'POST' ? $self->_account_logout_post($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/register') {
+        return $request->{method} eq 'POST' ? $self->_account_register_post($request) : $self->_account_register_get($request);
+    }
+    if ($path eq '/account/profile') {
+        return $request->{method} eq 'POST' ? $self->_account_profile_post($request) : $self->_account_profile_get($request);
+    }
+    if ($path eq '/account/notifications') {
+        return $request->{method} eq 'GET' ? $self->_account_notifications_page($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/notifications/mark-read') {
+        return $request->{method} eq 'POST' ? $self->_account_notifications_mark_read($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/account/notifications/preferences') {
+        return $request->{method} eq 'POST' ? $self->_account_notifications_preferences_save($request) : $self->_method_not_allowed;
+    }
+    return $self->_not_found;
+}
+
+sub _account_home {
+    my ($self, $request, $message) = @_;
+    $message ||= 'Provider linked.' if $request->param('linked');
+    $message ||= 'Provider removed.' if $request->param('unlinked');
+    my ($account, $token) = $self->_account_session($request);
+    return $self->_account_dashboard($request, $account, $token, $message) if $account;
+    return $self->_account_login_get($request, $message);
+}
+
+sub _account_login_get {
+    my ($self, $request, $message) = @_;
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $providers = $self->_account_provider_status;
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Sign in</h1>
+  <p class="module-intro">Use one public identity for carts, order history, forums, social profiles, streaming chat, and notifications.</p>
+  $notice
+  <form method="post" action="/account/login" class="member-form">
+    <label><span>Email or username</span><input name="login" autocomplete="username" required></label>
+    <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="member-links"><a href="/account/register">Create account</a> <a href="/account/password/forgot">Reset password</a></p>
+  $providers
+</article>
+HTML
+    return $self->_account_public_response('Account sign in', 'Sign in to your account.', '/account/login', $content);
+}
+
+sub _account_login_post {
+    my ($self, $request) = @_;
+    my ($account, $reason) = $self->{accounts}->authenticate(
+        login    => $request->param('login'),
+        password => $request->param('password'),
+        ip_address => $request->{ip_address},
+        user_agent => $request->{user_agent},
+    );
+    my %messages = (
+        disabled  => 'This account is disabled.',
+        moderated => 'This account is under moderation review.',
+        pending   => 'This account is pending approval.',
+        throttled => 'Too many failed sign-in attempts. Try again later.',
+        invalid   => 'The email, username, or password was not recognized.',
+    );
+    return $self->_account_login_get($request, $messages{$reason || 'invalid'} || $messages{invalid}) unless $account;
+    my ($token) = $self->{accounts}->create_session(
+        account    => $account,
+        ip_address => $request->{ip_address},
+        user_agent => $request->{user_agent},
+    );
+    $self->_attach_open_cart_to_account($request, $account);
+    return DesertCMS::HTTP->redirect('/account', {
+        'Set-Cookie' => $self->_account_cookie_header(value => $token),
+        security_headers(),
+    });
+}
+
+sub _account_forgot_password_get {
+    my ($self, $request, $message) = @_;
+    $message ||= 'Enter the email for your account and, if it matches an active account, a reset link will be sent.';
+    my $notice = '<p class="notice">' . escape_html($message) . '</p>';
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Reset password</h1>
+  $notice
+  <form method="post" action="/account/password/forgot" class="member-form">
+    <label><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+    <button type="submit">Send reset link</button>
+  </form>
+  <p class="member-links"><a href="/account/login">Back to sign in</a></p>
+</article>
+HTML
+    return $self->_account_public_response('Reset account password', 'Request an account password reset.', '/account/password/forgot', $content);
+}
+
+sub _account_forgot_password_post {
+    my ($self, $request) = @_;
+    my $message = 'If that email matches an active account, a reset link has been sent.';
+    eval {
+        my $reset = $self->{accounts}->create_password_reset_token_for_email(
+            email      => $request->param('email'),
+            ip_address => $request->{ip_address},
+            user_agent => $request->{user_agent},
+        );
+        if ($reset) {
+            my $url = $self->_absolute_url('/account/password/reset/' . $reset->{token});
+            my ($sent, $reason) = $self->_send_account_password_reset_email($reset->{email}, $url);
+            $self->{accounts}->record_audit_event(
+                account_id => $reset->{account_id},
+                event_type => 'account.password_reset_delivery_failed',
+                ip_address => $request->{ip_address},
+                user_agent => $request->{user_agent},
+                details    => { reason => $reason || 'delivery failed' },
+            ) unless $sent;
+        }
+        1;
+    };
+    return $self->_account_forgot_password_get($request, $message);
+}
+
+sub _account_password_reset_get {
+    my ($self, $request, $token, $message) = @_;
+    my $reset = $self->{accounts}->password_reset_from_token($token);
+    if (!$reset) {
+        my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Reset unavailable</h1>
+  <p>This reset link is invalid, expired, or already used.</p>
+  <p class="member-links"><a href="/account/password/forgot">Request a new link</a></p>
+</article>
+HTML
+        return $self->_account_public_response('Reset unavailable', 'Account reset unavailable.', '/account/password/reset/' . escape_html($token), $content, 404);
+    }
+    my $notice = $message ? '<p class="notice error">' . escape_html($message) . '</p>' : '';
+    my $email = escape_html($reset->{account_email} || $reset->{email} || '');
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Choose a new password</h1>
+  <p class="module-intro">$email</p>
+  $notice
+  <form method="post" action="/account/password/reset/$token" class="member-form">
+    <label><span>New password</span><input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+    <label><span>Confirm new password</span><input name="password_confirm" type="password" autocomplete="new-password" minlength="10" required></label>
+    <button type="submit">Save password</button>
+  </form>
+</article>
+HTML
+    return $self->_account_public_response('Choose a new account password', 'Choose a new account password.', '/account/password/reset/' . $token, $content);
+}
+
+sub _account_password_reset_post {
+    my ($self, $request, $token) = @_;
+    my $password = $request->param('password') || '';
+    my $confirm = $request->param('password_confirm') || '';
+    return $self->_account_password_reset_get($request, $token, 'Passwords do not match.')
+        if $password ne $confirm;
+    my $account = eval {
+        $self->{accounts}->consume_password_reset_token(
+            token      => $token,
+            password   => $password,
+            ip_address => $request->{ip_address},
+            user_agent => $request->{user_agent},
+        );
+    };
+    return $self->_account_password_reset_get($request, $token, $@ || 'The password could not be reset.') unless $account;
+    return $self->_account_login_get($request, 'Password updated. Sign in with the new password.');
+}
+
+sub _account_sso_start {
+    my ($self, $request, $provider) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $start = eval {
+        $self->{accounts}->oauth_start(
+            provider      => $provider,
+            settings      => $settings,
+            redirect_uri  => $self->_account_sso_redirect_uri($provider),
+            redirect_path => _account_safe_redirect_path($request->param('return') || '/account'),
+            ip_address    => $request->{ip_address},
+        );
+    };
+    return $self->_account_login_get($request, $@ || 'The SSO provider is not ready.') unless $start;
+    return DesertCMS::HTTP->redirect($start->{authorization_url}, { security_headers() });
+}
+
+sub _account_identity_start {
+    my ($self, $request, $provider) = @_;
+    my ($account) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $start = eval {
+        $self->{accounts}->oauth_start(
+            provider      => $provider,
+            account_id    => $account->{id},
+            settings      => $settings,
+            redirect_uri  => $self->_account_sso_redirect_uri($provider),
+            redirect_path => '/account?linked=1',
+            ip_address    => $request->{ip_address},
+        );
+    };
+    return $self->_account_home($request, $@ || 'The SSO provider could not be linked.') unless $start;
+    return DesertCMS::HTTP->redirect($start->{authorization_url}, { security_headers() });
+}
+
+sub _account_sso_callback {
+    my ($self, $request, $provider) = @_;
+    my $provider_label = _account_provider_label($provider);
+    if (length($request->param('error') || '')) {
+        my $error = $request->param('error_description') || $request->param('error');
+        eval {
+            $self->{accounts}->record_sso_failure(
+                provider   => $provider,
+                subject    => $provider,
+                ip_address => $request->{ip_address},
+                user_agent => $request->{user_agent},
+                error      => $error,
+            );
+            1;
+        };
+        return $self->_account_login_get($request, "$provider_label sign in was not completed: $error");
+    }
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $result = eval {
+        $self->{accounts}->oauth_complete(
+            provider     => $provider,
+            settings     => $settings,
+            redirect_uri => $self->_account_sso_redirect_uri($provider),
+            state        => $request->param('state'),
+            code         => $request->param('code'),
+            ip_address   => $request->{ip_address},
+            user_agent   => $request->{user_agent},
+        );
+    };
+    if (!$result || !$result->{account}) {
+        my $error = $@ || "$provider_label sign in failed.";
+        return $self->_account_login_get($request, $error);
+    }
+    if ($result->{linked}) {
+        return DesertCMS::HTTP->redirect(_account_safe_redirect_path($result->{redirect_path}), { security_headers() });
+    }
+    my ($token) = $self->{accounts}->create_session(
+        account    => $result->{account},
+        ip_address => $request->{ip_address},
+        user_agent => $request->{user_agent},
+    );
+    $self->_attach_open_cart_to_account($request, $result->{account});
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($result->{redirect_path}), {
+        'Set-Cookie' => $self->_account_cookie_header(value => $token),
+        security_headers(),
+    });
+}
+
+sub _account_logout_post {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    $self->{accounts}->revoke_session($token, ip_address => $request->{ip_address}, user_agent => $request->{user_agent});
+    return DesertCMS::HTTP->redirect('/account/login', {
+        'Set-Cookie' => $self->_account_cookie_header(value => '', max_age => 0),
+        security_headers(),
+    });
+}
+
+sub _account_register_get {
+    my ($self, $request, $message) = @_;
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Create account</h1>
+  <p class="module-intro">This unified identity can be used by Shop, Forums, Social, Live Streaming chat, and notification preferences when those modules are enabled.</p>
+  $notice
+  <form method="post" action="/account/register" class="member-form">
+    <label><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+    <label><span>Username</span><input name="username" autocomplete="username"></label>
+    <label><span>Display name</span><input name="display_name" autocomplete="name"></label>
+    <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+    <label><span>Confirm password</span><input name="password_confirm" type="password" autocomplete="new-password" minlength="10" required></label>
+    <button type="submit">Create account</button>
+  </form>
+  <p class="member-links"><a href="/account/login">Already have an account?</a></p>
+</article>
+HTML
+    return $self->_account_public_response('Create account', 'Create a public account.', '/account/register', $content);
+}
+
+sub _account_register_post {
+    my ($self, $request) = @_;
+    return $self->_account_register_get($request, 'Passwords do not match.')
+        unless ($request->param('password') || '') eq ($request->param('password_confirm') || '');
+    my $account = eval {
+        $self->{accounts}->create_account(
+            email        => $request->param('email'),
+            username     => $request->param('username'),
+            display_name => $request->param('display_name'),
+            password     => $request->param('password'),
+            status       => 'active',
+        );
+    };
+    return $self->_account_register_get($request, $@ || 'The account could not be created.') unless $account;
+    my ($token) = $self->{accounts}->create_session(
+        account    => $account,
+        ip_address => $request->{ip_address},
+        user_agent => $request->{user_agent},
+    );
+    $self->_attach_open_cart_to_account($request, $account);
+    return DesertCMS::HTTP->redirect('/account', {
+        'Set-Cookie' => $self->_account_cookie_header(value => $token),
+        security_headers(),
+    });
+}
+
+sub _account_dashboard {
+    my ($self, $request, $account, $token, $message) = @_;
+    my $name = escape_html($account->{display_name} || $account->{username} || $account->{email});
+    my $email = escape_html($account->{email} || '');
+    my $username = escape_html($account->{username} || '');
+    my $csrf = $self->{accounts}->csrf_token($token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $feature_cards = $self->_account_feature_cards;
+    my $identity_tools = $self->_account_identity_tools($account, $csrf);
+    my $notification_preview = $self->_account_notification_preview($account, $csrf);
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>$name</h1>
+  <p class="module-intro">$email</p>
+  $notice
+  <section class="docs-sections" aria-label="Account tools">
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Profile</h2>
+      <form method="post" action="/account/profile" class="member-form">
+        <input type="hidden" name="csrf_token" value="$csrf">
+        <label><span>Username</span><input name="username" value="$username" autocomplete="username"></label>
+        <label><span>Display name</span><input name="display_name" value="$name" autocomplete="name"></label>
+        <button type="submit">Save profile</button>
+      </form>
+    </section>
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Enabled Modules</h2>
+      <div class="docs-grid">$feature_cards</div>
+    </section>
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Connected Sign-In</h2>
+      $identity_tools
+    </section>
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Notifications</h2>
+      $notification_preview
+    </section>
+  </section>
+  <form method="post" action="/account/logout" class="inline-form">
+    <input type="hidden" name="csrf_token" value="$csrf">
+    <button type="submit" class="secondary">Sign out</button>
+  </form>
+</article>
+HTML
+    return $self->_account_private_response('Account', 'Unified public account dashboard.', '/account', $content);
+}
+
+sub _account_identity_unlink_post {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $ok = eval {
+        $self->{accounts}->unlink_identity(
+            account_id        => $account->{id},
+            actor_account_id  => $account->{id},
+            provider          => $request->param('provider'),
+            provider_subject  => $request->param('provider_subject'),
+            ip_address        => $request->{ip_address},
+            user_agent        => $request->{user_agent},
+        );
+    };
+    return $self->_account_dashboard($request, $account, $token, $@ || 'The provider could not be removed.') unless $ok;
+    return DesertCMS::HTTP->redirect('/account?unlinked=1', { security_headers() });
+}
+
+sub _account_profile_get {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_account_dashboard($request, $account, $token);
+}
+
+sub _account_profile_post {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $saved = eval {
+        $self->{accounts}->save_profile(
+            id           => $account->{id},
+            username     => $request->param('username'),
+            display_name => $request->param('display_name'),
+            profile      => $account->{profile} || {},
+        );
+    };
+    return $self->_account_dashboard($request, $account, $token, $@ || 'The profile could not be saved.') unless $saved;
+    return $self->_account_dashboard($request, $saved, $token, 'Profile saved.');
+}
+
+sub _account_notifications_page {
+    my ($self, $request, $message) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    my $csrf = $self->{accounts}->csrf_token($token);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $inbox = $self->_account_notification_rows($account, $csrf, limit => 80);
+    my $preferences = $self->_account_notification_preferences_form($account, $csrf);
+    my $unread = int($self->{notifications}->unread_count(audience => 'user', recipient_account_id => $account->{id}));
+    my $realtime_source = $self->_account_realtime_notification_source($account);
+    my $content = <<"HTML";
+<article class="content module-page accounts-page members-page">
+  <p class="kicker">Account</p>
+  <h1>Notifications</h1>
+  <p class="module-intro">$unread unread notification(s) for this account.</p>
+  $realtime_source
+  $notice
+  <section class="docs-sections" aria-label="Notification tools">
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Inbox</h2>
+      <table class="content-table compact-table admin-card-table">
+        <thead><tr><th>Notice</th><th>Topic</th><th>Status</th><th>When</th><th>Actions</th></tr></thead>
+        <tbody>$inbox</tbody>
+      </table>
+    </section>
+    <section class="docs-audience-group">
+      <h2 class="docs-audience-heading">Preferences</h2>
+      $preferences
+    </section>
+  </section>
+  <p class="member-links"><a href="/account">Back to account</a></p>
+</article>
+HTML
+    return $self->_account_private_response('Account notifications', 'Account notification inbox and preferences.', '/account/notifications', $content);
+}
+
+sub _account_realtime_notification_source {
+    my ($self, $account) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return '' unless _setting_truthy($settings->{realtime_enabled});
+    my $account_id = int($account->{id} || 0);
+    return '' unless $account_id > 0;
+    my $channel = 'user.notifications.' . $account_id;
+    my $token = eval { DesertCMS::Realtime->channel_token($self->{config}, channel => $channel, ttl_seconds => 900) };
+    return '' unless length($token || '');
+    my $status = DesertCMS::Realtime->service_status({
+        site_url            => $self->{config}->get('site_url') || '',
+        realtime_enabled    => $settings->{realtime_enabled},
+        realtime_bind_host  => $settings->{realtime_bind_host},
+        realtime_port       => $settings->{realtime_port},
+        realtime_public_url => $settings->{realtime_public_url},
+    });
+    my $url = ($status->{url} || '') . '?channel=' . $channel . '&token=' . $token;
+    return '<div class="realtime-account-source" hidden data-realtime-channel="' . escape_html($channel)
+        . '" data-realtime-token="' . escape_html($token)
+        . '" data-realtime-url="' . escape_html($url)
+        . '"></div>';
+}
+
+sub _account_notifications_mark_read {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $id = int($request->param('id') || 0);
+    $self->{notifications}->mark_read(
+        id                   => $id,
+        audience             => 'user',
+        recipient_account_id => $account->{id},
+    ) if $id;
+    return DesertCMS::HTTP->redirect('/account/notifications', { security_headers() });
+}
+
+sub _account_notifications_preferences_save {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my %selected = map { $_ => 1 } _request_values($request, 'notification_topic');
+    for my $topic (@{ $self->{notifications}->topics }) {
+        next unless $topic =~ /^(?:forums|social|stream)\./;
+        $self->{notifications}->set_preference(
+            audience             => 'user',
+            recipient_account_id => $account->{id},
+            topic                => $topic,
+            delivery_channel     => 'in_app',
+            enabled              => $selected{$topic} ? 1 : 0,
+        );
+    }
+    return $self->_account_notifications_page($request, 'Notification preferences saved.');
+}
+
+sub _account_notification_preview {
+    my ($self, $account, $csrf) = @_;
+    return '<p class="muted">Notifications are disabled for this site.</p>'
+        unless DesertCMS::Modules::enabled(DesertCMS::Settings::all($self->{config}, $self->{db}), 'notifications');
+    my $unread = int($self->{notifications}->unread_count(audience => 'user', recipient_account_id => $account->{id}));
+    my $unread_class = $unread ? 'warn' : 'status-pill--neutral';
+    my $rows = $self->_account_notification_rows($account, $csrf, limit => 5);
+    return <<"HTML";
+<p><span class="status-pill $unread_class">$unread unread</span></p>
+<table class="content-table compact-table admin-card-table">
+  <thead><tr><th>Notice</th><th>Topic</th><th>Status</th><th>When</th><th>Actions</th></tr></thead>
+  <tbody>$rows</tbody>
+</table>
+<p class="member-links"><a href="/account/notifications">Open notification settings</a></p>
+HTML
+}
+
+sub _account_notification_rows {
+    my ($self, $account, $csrf, %args) = @_;
+    my $limit = int($args{limit} || 20);
+    my $rows = '';
+    for my $notification (@{ $self->{notifications}->inbox_for_account($account->{id}, limit => $limit) }) {
+        my $id = int($notification->{id} || 0);
+        my $title = escape_html($notification->{title} || '');
+        my $body = escape_html($notification->{body} || '');
+        my $topic = escape_html($notification->{topic} || '');
+        my $status = escape_html($notification->{status} || '');
+        my $created = escape_html(_format_time($notification->{created_at}));
+        my $url = _account_safe_redirect_path($notification->{url} || '');
+        my $open = length($notification->{url} || '') ? qq{<a class="button-link secondary button-link--compact" href="@{[escape_html($url)]}">Open</a>} : '';
+        my $mark = ($notification->{status} || '') eq 'unread'
+            ? qq{<form method="post" action="/account/notifications/mark-read" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="id" value="$id"><button type="submit" class="button-link secondary button-link--compact">Mark read</button></form>}
+            : '';
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Notice"><strong>$title</strong><br><span class="muted">$body</span></td>
+  <td data-label="Topic"><code>$topic</code></td>
+  <td data-label="Status"><span class="status-pill">$status</span></td>
+  <td data-label="When">$created</td>
+  <td data-label="Actions" class="table-actions">$open$mark</td>
+</tr>
+HTML
+    }
+    return $rows || _admin_empty_row(5, 'No account notifications yet.', 'Follows, replies, mentions, forum activity, and live stream events will appear here.');
+}
+
+sub _account_notification_preferences_form {
+    my ($self, $account, $csrf) = @_;
+    my $rows = '';
+    for my $topic (@{ $self->{notifications}->topics }) {
+        next unless $topic =~ /^(?:forums|social|stream)\./;
+        my $enabled = $self->{notifications}->preference_enabled(
+            audience             => 'user',
+            recipient_account_id => $account->{id},
+            topic                => $topic,
+            delivery_channel     => 'in_app',
+        );
+        my $checked = $enabled ? ' checked' : '';
+        my $safe_topic = escape_html($topic);
+        (my $label_text = $topic) =~ s/[._-]+/ /g;
+        my $label = escape_html(_title_case_status($label_text));
+        $rows .= qq{<label class="checkbox-field"><input type="checkbox" name="notification_topic" value="$safe_topic"$checked><span>$label<small><code>$safe_topic</code></small></span></label>};
+    }
+    $rows ||= '<p class="muted">No account notification topics are registered yet.</p>';
+    return <<"HTML";
+<form method="post" action="/account/notifications/preferences" class="settings-form settings-form--wide">
+  <input type="hidden" name="csrf_token" value="$csrf">
+  <div class="dashboard-widget-option-grid">$rows</div>
+  <button type="submit">Save notification preferences</button>
+</form>
+HTML
+}
+
+sub _account_feature_cards {
+    my ($self) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my @features = (
+        [ shop           => 'Shop carts',       'Account-backed carts and order history are available when Shop is enabled.' ],
+        [ forums         => 'Forums',           'Use this account for forum topics, replies, reports, and moderation.' ],
+        [ social         => 'Social profile',   'Use this account for profiles, follows, mentions, reactions, and reporting.' ],
+        [ live_streaming => 'Live chat',        'Use this account for stream chat, schedules, and moderation.' ],
+        [ notifications  => 'Notifications',    'Module notifications can target this account.' ],
+    );
+    my $html = '';
+    for my $feature (@features) {
+        my ($key, $label, $body) = @{$feature};
+        next unless DesertCMS::Modules::enabled($settings, $key);
+        $html .= '<article class="doc-card"><h3>' . escape_html($label) . '</h3><p>' . escape_html($body) . '</p></article>';
+    }
+    return $html || '<p class="muted">No account-aware public modules are enabled yet.</p>';
+}
+
+sub _account_provider_status {
+    my ($self) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my @links;
+    my $google = DesertCMS::Accounts::oauth_provider_readiness(
+        provider     => 'google',
+        settings     => $settings,
+        redirect_uri => $self->_account_sso_redirect_uri('google'),
+    );
+    my $oidc = DesertCMS::Accounts::oauth_provider_readiness(
+        provider     => 'oidc',
+        settings     => $settings,
+        redirect_uri => $self->_account_sso_redirect_uri('oidc'),
+    );
+    if ($google->{ready}) {
+        push @links, '<a class="button-link secondary" href="/account/sso/google/start">Continue with Google</a>';
+    }
+    if ($oidc->{ready}) {
+        push @links, '<a class="button-link secondary" href="/account/sso/oidc/start">Continue with SSO</a>';
+    }
+    return qq{<section class="sso-provider-list" aria-label="Single sign-on">} . join('', @links) . qq{</section>} if @links;
+    return qq{<p class="muted">SSO providers can be configured from the Accounts module settings.</p>};
+}
+
+sub _account_identity_tools {
+    my ($self, $account, $csrf) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my $identities = $self->{accounts}->linked_identities($account->{id});
+    my %linked = map { ($_->{provider} || '') => 1 } @{$identities};
+    my $google = DesertCMS::Accounts::oauth_provider_readiness(
+        provider     => 'google',
+        settings     => $settings,
+        redirect_uri => $self->_account_sso_redirect_uri('google'),
+    );
+    my $oidc = DesertCMS::Accounts::oauth_provider_readiness(
+        provider     => 'oidc',
+        settings     => $settings,
+        redirect_uri => $self->_account_sso_redirect_uri('oidc'),
+    );
+    my $rows = '';
+    for my $identity (@{$identities}) {
+        my $provider = escape_html(_account_provider_label($identity->{provider} || 'oidc'));
+        my $email = escape_html($identity->{email} || '');
+        my $subject = escape_html($identity->{provider_subject} || '');
+        my $raw_provider = escape_html($identity->{provider} || '');
+        $rows .= <<"HTML";
+<tr>
+  <td data-label="Provider"><strong>$provider</strong><br><span class="muted">$email</span></td>
+  <td data-label="Subject"><code>$subject</code></td>
+  <td data-label="Actions">
+    <form method="post" action="/account/identity/unlink" class="inline-form">
+      <input type="hidden" name="csrf_token" value="$csrf">
+      <input type="hidden" name="provider" value="$raw_provider">
+      <input type="hidden" name="provider_subject" value="$subject">
+      <button type="submit" class="secondary">Remove</button>
+    </form>
+  </td>
+</tr>
+HTML
+    }
+    my @connect;
+    push @connect, '<a class="button-link secondary" href="/account/identity/google/start">Connect Google</a>'
+        if !$linked{google} && $google->{ready};
+    push @connect, '<a class="button-link secondary" href="/account/identity/oidc/start">Connect SSO</a>'
+        if !$linked{oidc} && $oidc->{ready};
+    my $connect = @connect ? '<div class="button-row">' . join('', @connect) . '</div>' : '<p class="muted">No additional SSO providers are configured for this account.</p>';
+    my $table = $rows
+        ? qq{<table class="content-table compact-table"><thead><tr><th>Provider</th><th>Subject</th><th>Actions</th></tr></thead><tbody>$rows</tbody></table>}
+        : '<p class="muted">No connected SSO providers yet.</p>';
+    return $table . $connect;
+}
+
+sub _account_sso_redirect_uri {
+    my ($self, $provider) = @_;
+    $provider = $provider eq 'google' ? 'google' : 'oidc';
+    return $self->_absolute_url("/account/sso/$provider/callback");
+}
+
+sub _account_safe_redirect_path {
+    my ($value) = @_;
+    $value = '' unless defined $value;
+    $value =~ s/\A\s+|\s+\z//g;
+    return '/account' unless length $value;
+    return '/account' unless $value =~ m{\A/[^\r\n]*\z} && $value !~ m{\A//};
+    return $value;
+}
+
+sub _account_provider_label {
+    my ($provider) = @_;
+    return $provider eq 'google' ? 'Google' : 'OIDC';
+}
+
+sub _account_session {
+    my ($self, $request) = @_;
+    my $cookie = $self->_account_cookie_name;
+    my $token = $request->cookie($cookie);
+    my $account = $self->{accounts}->session_from_token($token);
+    return ($account, $token);
+}
+
+sub _account_cookie_name {
+    my ($self) = @_;
+    return $self->{config}->get('account_session_cookie') || 'desertcms_account_session';
+}
+
+sub _account_cookie_header {
+    my ($self, %args) = @_;
+    my $name = $self->_account_cookie_name;
+    my $value = defined $args{value} ? $args{value} : '';
+    my @parts = ("$name=$value", 'Path=/', 'HttpOnly', 'SameSite=Lax');
+    push @parts, 'Secure' if $self->{config}->get('secure_cookies');
+    push @parts, 'Max-Age=' . int($args{max_age}) if defined $args{max_age};
+    return join '; ', @parts;
+}
+
+sub _account_public_response {
+    my ($self, $title, $description, $path, $content, $status) = @_;
+    return DesertCMS::HTTP->response(
+        status  => $status || 200,
+        headers => {
+            'Content-Type' => 'text/html; charset=utf-8',
+            security_headers(),
+        },
+        body => DesertCMS::Renderer::render_module_page($self->{config}, $self->{db}, {
+            title       => $title,
+            description => $description,
+            path        => $path,
+            context     => 'accounts',
+            content     => $content,
+        }),
+    );
+}
+
+sub _account_private_response {
+    my ($self, $title, $description, $path, $content, $status) = @_;
+    return DesertCMS::HTTP->response(
+        status  => $status || 200,
+        headers => {
+            'Content-Type'  => 'text/html; charset=utf-8',
+            'Cache-Control' => 'private, no-store',
+            security_headers(),
+        },
+        body => DesertCMS::Renderer::render_module_page($self->{config}, $self->{db}, {
+            title       => $title,
+            description => $description,
+            path        => $path,
+            context     => 'accounts',
+            content     => $content,
+        }),
+    );
+}
+
+sub _attach_open_cart_to_account {
+    my ($self, $request, $account) = @_;
+    return unless $account && int($account->{id} || 0) > 0;
+    my $cart_token = $request->cookie($self->{config}->get('shop_cart_cookie') || 'desertcms_shop_cart');
+    return unless defined $cart_token && length $cart_token;
+    eval {
+        $self->{accounts}->attach_cart(
+            account_id    => $account->{id},
+            session_token => $cart_token,
+        );
+        1;
+    };
+}
+
+sub _dispatch_forums {
+    my ($self, $request) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'forums');
+    my $path = $request->{path} || '/forums';
+    $path =~ s{/+\z}{};
+    $path = '/forums' if $path eq '';
+    return $request->{method} eq 'GET' ? $self->_forums_home($request) : $self->_method_not_allowed
+        if $path eq '/forums';
+    if ($path =~ m{\A/forums/category/([A-Za-z0-9-]+)\z}) {
+        return $request->{method} eq 'GET' ? $self->_forum_category_page($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/forums/category/([A-Za-z0-9-]+)/topics\z}) {
+        return $request->{method} eq 'POST' ? $self->_forum_topic_create($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/forums/category/([A-Za-z0-9-]+)/([A-Za-z0-9-]+)\z}) {
+        return $request->{method} eq 'GET' ? $self->_forum_topic_page($request, $1, $2) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/forums/topics/([0-9]+)/reply\z}) {
+        return $request->{method} eq 'POST' ? $self->_forum_reply_create($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/forums/posts/([0-9]+)/edit\z}) {
+        return $request->{method} eq 'POST' ? $self->_forum_post_edit($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/forums/posts/([0-9]+)/delete\z}) {
+        return $request->{method} eq 'POST' ? $self->_forum_post_delete($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path eq '/forums/report') {
+        return $request->{method} eq 'POST' ? $self->_forum_report($request) : $self->_method_not_allowed;
+    }
+    return $self->_not_found;
+}
+
+sub _forums_home {
+    my ($self, $request, $message) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    my ($account) = $self->_account_session($request);
+    my $viewer_id = $account ? int($account->{id} || 0) : 0;
+    my $title = escape_html($settings->{forums_title} || 'Forums');
+    my $intro = escape_html($settings->{forums_intro} || 'Community categories, topics, replies, moderation, and notifications.');
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $cards = '';
+    for my $category (@{ $self->{forums}->categories(viewer_account_id => $viewer_id) }) {
+        my $name = escape_html($category->{title} || 'Forum');
+        my $slug = escape_html($category->{slug} || '');
+        my $description = escape_html($category->{description} || '');
+        my $topics = int($category->{topic_count} || 0);
+        my $posts = int($category->{post_count} || 0);
+        my $visibility = ($category->{visibility} || 'public') eq 'public' ? '' : ' / ' . escape_html($category->{visibility});
+        $cards .= <<"HTML";
+<a class="doc-card" href="/forums/category/$slug">
+  <h3>$name</h3>
+  <p>$description</p>
+  <small>$topics topics / $posts posts$visibility</small>
+</a>
+HTML
+    }
+    $cards ||= '<p class="muted">No forum categories are available yet.</p>';
+    my $content = <<"HTML";
+<article class="content module-page forums-page">
+  <p class="kicker">Forums</p>
+  <h1>$title</h1>
+  <p class="module-intro">$intro</p>
+  $notice
+  <section class="docs-grid">$cards</section>
+</article>
+HTML
+    return $self->_module_public_response('Forums', $intro, '/forums', $content, 'forums');
+}
+
+sub _forum_category_page {
+    my ($self, $request, $slug, $message) = @_;
+    my $category = $self->{forums}->category_by_slug($slug);
+    my ($account, $token) = $self->_account_session($request);
+    my $viewer_id = $account ? int($account->{id} || 0) : 0;
+    my ($can_view_category) = $self->{forums}->can_view_category(category => $category, viewer_account_id => $viewer_id);
+    return $self->_not_found unless $can_view_category;
+    my $safe_title = escape_html($category->{title} || 'Forum');
+    my $safe_slug = escape_html($category->{slug} || '');
+    my $description = escape_html($category->{description} || '');
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $topic_rows = '';
+    for my $topic (@{ $self->{forums}->topics_for_category($category->{id}, viewer_account_id => $viewer_id) }) {
+        my $title = escape_html($topic->{title} || 'Topic');
+        my $topic_slug = escape_html($topic->{slug} || '');
+        my $author = escape_html($topic->{display_name} || $topic->{username} || 'Account');
+        my $replies = int($topic->{reply_count} || 0);
+        $topic_rows .= qq{<a class="doc-card" href="/forums/category/$safe_slug/$topic_slug"><h3>$title</h3><p>Started by $author</p><small>$replies posts</small></a>};
+    }
+    $topic_rows ||= '<p class="muted">No topics yet.</p>';
+    my $form = '<p class="muted">Sign in with an account to start a topic.</p>';
+    my ($can_create_topic) = $account
+        ? $self->{forums}->can_account(action => 'create_topic', account_id => $account->{id}, category => $category)
+        : 0;
+    if ($can_create_topic) {
+        my $csrf = $self->{accounts}->csrf_token($token);
+        $form = <<"HTML";
+<form method="post" action="/forums/category/$safe_slug/topics" class="member-form">
+  <input type="hidden" name="csrf_token" value="$csrf">
+  <label><span>Topic title</span><input name="title" required></label>
+  <label><span>Post</span><textarea name="body" rows="5" required></textarea></label>
+  <button type="submit">Start topic</button>
+</form>
+HTML
+    }
+    my $content = <<"HTML";
+<article class="content module-page forums-page members-page">
+  <p class="kicker">Forum Category</p>
+  <h1>$safe_title</h1>
+  <p class="module-intro">$description</p>
+  $notice
+  <section class="docs-grid">$topic_rows</section>
+  <section class="docs-audience-group">
+    <h2 class="docs-audience-heading">Start Topic</h2>
+    $form
+  </section>
+</article>
+HTML
+    return $self->_module_public_response($category->{title}, $category->{description}, '/forums/category/' . ($category->{slug} || ''), $content, 'forums');
+}
+
+sub _forum_topic_create {
+    my ($self, $request, $category_slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $category = $self->{forums}->category_by_slug($category_slug);
+    return $self->_not_found unless $category;
+    my $topic = eval {
+        $self->{forums}->create_topic(
+            category_id => $category->{id},
+            account_id  => $account->{id},
+            ip_address  => $request->{ip_address},
+            title       => $request->param('title'),
+            body        => $request->param('body'),
+        );
+    };
+    return $self->_forum_category_page($request, $category_slug, $@ || 'The topic could not be created.') unless $topic;
+    return DesertCMS::HTTP->redirect('/forums/category/' . ($topic->{category_slug} || $category_slug) . '/' . ($topic->{slug} || ''), { security_headers() });
+}
+
+sub _forum_topic_page {
+    my ($self, $request, $category_slug, $topic_slug, $message) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    my $viewer_id = $account ? int($account->{id} || 0) : 0;
+    my $topic = $self->{forums}->topic_by_slug($category_slug, $topic_slug, viewer_account_id => $viewer_id);
+    return $self->_not_found unless $topic;
+    my ($can_view_topic) = $self->{forums}->can_view_topic(topic => $topic, viewer_account_id => $viewer_id);
+    return $self->_not_found unless $can_view_topic;
+    my $safe_title = escape_html($topic->{title} || 'Topic');
+    my $safe_category = escape_html($topic->{category_title} || 'Forum');
+    my $topic_path = _forum_topic_path($topic);
+    my $safe_topic_path = escape_html($topic_path);
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $topic_actions = '';
+    if ($account) {
+        my $csrf = $self->{accounts}->csrf_token($token);
+        my $topic_id = int($topic->{id} || 0);
+        $topic_actions = qq{<form method="post" action="/forums/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="kind" value="topic"><input type="hidden" name="topic_id" value="$topic_id"><input type="hidden" name="return" value="$safe_topic_path"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report topic</button></form>};
+    }
+    my $posts = '';
+    for my $post (@{ $self->{forums}->posts_for_topic($topic->{id}, viewer_account_id => $viewer_id) }) {
+        my $author = escape_html($post->{display_name} || $post->{username} || 'Account');
+        my $body = _plain_text_html($post->{body});
+        my $time = escape_html(_format_time($post->{created_at}));
+        my $post_id = int($post->{id} || 0);
+        my $post_actions = '';
+        if ($account) {
+            my $csrf = $self->{accounts}->csrf_token($token);
+            my $report = qq{<form method="post" action="/forums/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="kind" value="post"><input type="hidden" name="post_id" value="$post_id"><input type="hidden" name="return" value="$safe_topic_path"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report</button></form>};
+            my ($can_edit) = $self->{forums}->can_edit_post(post => $post, account_id => $account->{id});
+            my $edit = '';
+            if ($can_edit) {
+                my $edit_body = escape_html($post->{body} || '');
+                $edit = qq{<form method="post" action="/forums/posts/$post_id/edit" class="member-form forum-edit-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="return" value="$safe_topic_path"><label><span>Edit reply</span><textarea name="body" rows="4" required>$edit_body</textarea></label><button type="submit">Save edit</button></form>};
+            }
+            my ($can_delete) = $self->{forums}->can_delete_post(post => $post, account_id => $account->{id});
+            my $delete = $can_delete
+                ? qq{<form method="post" action="/forums/posts/$post_id/delete" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="return" value="$safe_topic_path"><button type="submit" class="button-link secondary button-link--compact button-link--warn">Delete</button></form>}
+                : '';
+            $post_actions = qq{<div class="button-row">$report$delete</div>$edit};
+        }
+        $posts .= qq{<article class="doc-card"><h3>$author</h3>$body<small>$time</small>$post_actions</article>};
+    }
+    my $reply = '<p class="muted">Sign in with an account to reply.</p>';
+    my ($can_reply) = $account
+        ? $self->{forums}->can_account(action => 'reply', account_id => $account->{id}, topic => $topic)
+        : 0;
+    if ($can_reply) {
+        my $csrf = $self->{accounts}->csrf_token($token);
+        my $id = int($topic->{id});
+        $reply = <<"HTML";
+<form method="post" action="/forums/topics/$id/reply" class="member-form">
+  <input type="hidden" name="csrf_token" value="$csrf">
+  <label><span>Reply</span><textarea name="body" rows="5" required></textarea></label>
+  <button type="submit">Reply</button>
+</form>
+HTML
+    }
+    my $content = <<"HTML";
+<article class="content module-page forums-page members-page">
+  <p class="kicker">$safe_category</p>
+  <h1>$safe_title</h1>
+  $notice
+  $topic_actions
+  <section class="docs-grid">$posts</section>
+  <section class="docs-audience-group">
+    <h2 class="docs-audience-heading">Reply</h2>
+    $reply
+  </section>
+</article>
+HTML
+    return $self->_module_public_response($topic->{title}, $topic->{category_title}, '/forums/category/' . ($topic->{category_slug} || '') . '/' . ($topic->{slug} || ''), $content, 'forums');
+}
+
+sub _forum_reply_create {
+    my ($self, $request, $topic_id) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $topic = $self->{forums}->topic_by_id($topic_id);
+    return $self->_not_found unless $topic;
+    my $reply = eval {
+        $self->{forums}->add_reply(
+            topic_id   => $topic->{id},
+            account_id => $account->{id},
+            ip_address => $request->{ip_address},
+            body       => $request->param('body'),
+        );
+    };
+    return $self->_forum_topic_page($request, $topic->{category_slug}, $topic->{slug}, $@ || 'The reply could not be saved.') unless $reply;
+    return DesertCMS::HTTP->redirect('/forums/category/' . ($topic->{category_slug} || '') . '/' . ($topic->{slug} || ''), { security_headers() });
+}
+
+sub _forum_post_edit {
+    my ($self, $request, $post_id) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $post = $self->{forums}->post_by_id($post_id);
+    return $self->_not_found unless $post;
+    my $topic = $self->{forums}->topic_by_id($post->{topic_id});
+    return $self->_not_found unless $topic;
+    my $return = _account_safe_redirect_path($request->param('return') || _forum_topic_path($topic));
+    my $edited = eval {
+        $self->{forums}->edit_post(
+            id         => $post_id,
+            account_id => $account->{id},
+            body       => $request->param('body'),
+        );
+    };
+    return DesertCMS::HTTP->redirect($return, { security_headers() }) if $edited;
+    return $self->_forum_topic_page($request, $topic->{category_slug}, $topic->{slug}, $@ || 'The forum post could not be edited.');
+}
+
+sub _forum_post_delete {
+    my ($self, $request, $post_id) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $post = $self->{forums}->post_by_id($post_id);
+    return $self->_not_found unless $post;
+    my $topic = $self->{forums}->topic_by_id($post->{topic_id});
+    return $self->_not_found unless $topic;
+    my $return = _account_safe_redirect_path($request->param('return') || _forum_topic_path($topic));
+    my $deleted = eval {
+        $self->{forums}->delete_post(
+            id         => $post_id,
+            account_id => $account->{id},
+        );
+    };
+    return DesertCMS::HTTP->redirect($return, { security_headers() }) if $deleted;
+    return $self->_forum_topic_page($request, $topic->{category_slug}, $topic->{slug}, $@ || 'The forum post could not be deleted.');
+}
+
+sub _forum_report {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $kind = lc($request->param('kind') || 'post');
+    my $return = _account_safe_redirect_path($request->param('return') || '/forums');
+    eval {
+        if ($kind eq 'topic') {
+            $self->{forums}->report_topic(
+                topic_id            => $request->param('topic_id'),
+                reporter_account_id => $account->{id},
+                reason              => $request->param('reason'),
+            );
+        } else {
+            $self->{forums}->report_post(
+                post_id             => $request->param('post_id'),
+                reporter_account_id => $account->{id},
+                reason              => $request->param('reason'),
+            );
+        }
+        1;
+    };
+    return DesertCMS::HTTP->redirect($return, { security_headers() });
+}
+
+sub _forum_topic_path {
+    my ($topic) = @_;
+    return '/forums' unless $topic;
+    return '/forums/category/' . ($topic->{category_slug} || '') . '/' . ($topic->{slug} || '');
+}
+
+sub _dispatch_social {
+    my ($self, $request) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'social');
+    my $path = $request->{path} || '/social';
+    $path =~ s{/+\z}{};
+    $path = '/social' if $path eq '';
+    return $request->{method} eq 'GET' ? $self->_social_home($request) : $self->_method_not_allowed
+        if $path eq '/social';
+    return $request->{method} eq 'POST' ? $self->_social_post_create($request) : $self->_method_not_allowed
+        if $path eq '/social/posts/create';
+    return $request->{method} eq 'POST' ? $self->_social_post_delete($request) : $self->_method_not_allowed
+        if $path eq '/social/posts/delete';
+    return $request->{method} eq 'POST' ? $self->_social_react($request) : $self->_method_not_allowed
+        if $path eq '/social/react';
+    return $request->{method} eq 'POST' ? $self->_social_reply_create($request) : $self->_method_not_allowed
+        if $path eq '/social/replies/create';
+    return $request->{method} eq 'POST' ? $self->_social_reply_delete($request) : $self->_method_not_allowed
+        if $path eq '/social/replies/delete';
+    return $request->{method} eq 'POST' ? $self->_social_follow($request) : $self->_method_not_allowed
+        if $path eq '/social/follow';
+    return $request->{method} eq 'POST' ? $self->_social_unfollow($request) : $self->_method_not_allowed
+        if $path eq '/social/unfollow';
+    return $request->{method} eq 'POST' ? $self->_social_block($request) : $self->_method_not_allowed
+        if $path eq '/social/block';
+    return $request->{method} eq 'POST' ? $self->_social_unblock($request) : $self->_method_not_allowed
+        if $path eq '/social/unblock';
+    return $request->{method} eq 'POST' ? $self->_social_report($request) : $self->_method_not_allowed
+        if $path eq '/social/report';
+    if ($path =~ m{\A/social/@([A-Za-z0-9_.-]+)\z}) {
+        return $request->{method} eq 'GET' ? $self->_social_profile_page($request, $1) : $self->_method_not_allowed;
+    }
+    return $self->_not_found;
+}
+
+sub _social_home {
+    my ($self, $request, $message) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    my $mode = _social_feed_mode($request->param('feed'));
+    my $page = _social_page_number($request->param('page'));
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $return_path = _social_feed_path(mode => $mode, page => $page);
+    my $feed_controls = _social_feed_controls($mode, $account ? 1 : 0);
+    my $feed = $self->_social_feed_cards(
+        $account,
+        $token,
+        page        => $page,
+        feed_mode   => $mode,
+        return_path => $return_path,
+    );
+    my $composer = '<p class="muted">Sign in with an account to post.</p>';
+    if ($account) {
+        my $csrf = $self->{accounts}->csrf_token($token);
+        $composer = <<"HTML";
+<form method="post" action="/social/posts/create" class="member-form">
+  <input type="hidden" name="csrf_token" value="$csrf">
+  <label><span>Post</span><textarea name="body" rows="4" required></textarea></label>
+  <label><span>Visibility</span><select name="visibility"><option value="public">Public</option><option value="followers">Followers</option><option value="private">Private</option></select></label>
+  <button type="submit">Post</button>
+</form>
+HTML
+    }
+    my $content = <<"HTML";
+<article class="content module-page social-page members-page">
+  <p class="kicker">Social</p>
+  <h1>Social Feed</h1>
+  <p class="module-intro">Unified-account profiles, follows, feed posts, reactions, mentions, reporting, moderation, and notifications.</p>
+  $notice
+  $feed_controls
+  <section class="docs-audience-group">
+    <h2 class="docs-audience-heading">Composer</h2>
+    $composer
+  </section>
+  <section class="docs-grid">$feed</section>
+</article>
+HTML
+    return $self->_module_public_response('Social', 'Social feed.', '/social', $content, 'social');
+}
+
+sub _social_post_create {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $post = eval {
+        $self->{social}->create_post(
+            account_id  => $account->{id},
+            body        => $request->param('body'),
+            visibility  => $request->param('visibility'),
+        );
+    };
+    return $self->_social_home($request, $@ || 'The social post could not be saved.') unless $post;
+    return DesertCMS::HTTP->redirect('/social', { security_headers() });
+}
+
+sub _social_react {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->react(
+            post_id    => $request->param('post_id'),
+            account_id => $account->{id},
+            reaction   => $request->param('reaction') || 'like',
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_reply_create {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->add_reply(
+            post_id    => $request->param('post_id'),
+            account_id => $account->{id},
+            body       => $request->param('body'),
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_post_delete {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->delete_post(
+            id         => $request->param('post_id'),
+            account_id => $account->{id},
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_reply_delete {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->delete_reply(
+            id         => $request->param('reply_id'),
+            account_id => $account->{id},
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_follow {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->follow(
+            follower_account_id => $account->{id},
+            followed_account_id => $request->param('profile_account_id'),
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_unfollow {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->unfollow(
+            follower_account_id => $account->{id},
+            followed_account_id => $request->param('profile_account_id'),
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_block {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->block(
+            blocker_account_id => $account->{id},
+            blocked_account_id => $request->param('profile_account_id'),
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_unblock {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    eval {
+        $self->{social}->unblock(
+            blocker_account_id => $account->{id},
+            blocked_account_id => $request->param('profile_account_id'),
+        );
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_report {
+    my ($self, $request) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $kind = lc($request->param('kind') || 'post');
+    eval {
+        if ($kind eq 'reply') {
+            $self->{social}->report_reply(
+                reply_id             => $request->param('reply_id'),
+                reporter_account_id  => $account->{id},
+                reason               => $request->param('reason'),
+            );
+        } elsif ($kind eq 'profile') {
+            $self->{social}->report_profile(
+                profile_account_id   => $request->param('profile_account_id'),
+                reporter_account_id  => $account->{id},
+                reason               => $request->param('reason'),
+            );
+        } else {
+            $self->{social}->report_post(
+                post_id              => $request->param('post_id'),
+                reporter_account_id  => $account->{id},
+                reason               => $request->param('reason'),
+            );
+        }
+        1;
+    };
+    return DesertCMS::HTTP->redirect(_account_safe_redirect_path($request->param('return') || '/social'), { security_headers() });
+}
+
+sub _social_profile_page {
+    my ($self, $request, $handle) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    my $viewer_id = $account ? int($account->{id} || 0) : 0;
+    my $profile = $self->{social}->profile_by_handle($handle, viewer_account_id => $viewer_id, include_hidden => $account ? 1 : 0);
+    return $self->_not_found unless $profile;
+    my ($can_view_profile, $profile_view_reason) = $self->{social}->can_view_profile(profile => $profile, viewer_account_id => $viewer_id);
+    my $csrf = $account ? $self->{accounts}->csrf_token($token) : '';
+    my $name = escape_html($profile->{display_name} || $profile->{handle});
+    my $safe_handle = escape_html($profile->{handle} || '');
+    my $profile_account_id = int($profile->{account_id} || 0);
+    my $viewer_follow_status = $account && $viewer_id != $profile_account_id
+        ? $self->{social}->follow_status(
+            follower_account_id => $viewer_id,
+            followed_account_id => $profile_account_id,
+        )
+        : '';
+    my $blocked_profile = !$can_view_profile
+        && $account
+        && ($profile_view_reason || '') =~ /blocked/
+        && ($viewer_follow_status || '') eq 'blocked';
+    return $self->_not_found unless $can_view_profile || $blocked_profile;
+    my $bio = $blocked_profile
+        ? '<p class="muted">This profile is blocked.</p>'
+        : _plain_text_html($profile->{bio});
+    my $profile_actions = '';
+    if ($account && int($account->{id} || 0) != $profile_account_id) {
+        my $return = escape_html('/social/@' . ($profile->{handle} || ''));
+        my $unblock = qq{<form method="post" action="/social/unblock" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="profile_account_id" value="$profile_account_id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Unblock</button></form>};
+        if ($blocked_profile) {
+            $profile_actions = qq{<div class="button-row">$unblock</div>};
+        } else {
+            my $follow_action = $viewer_follow_status && $viewer_follow_status eq 'active'
+                ? qq{<form method="post" action="/social/unfollow" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="profile_account_id" value="$profile_account_id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Unfollow</button></form>}
+                : qq{<form method="post" action="/social/follow" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="profile_account_id" value="$profile_account_id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Follow</button></form>};
+            my $block = qq{<form method="post" action="/social/block" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="profile_account_id" value="$profile_account_id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Block</button></form>};
+            my $report = qq{<form method="post" action="/social/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="kind" value="profile"><input type="hidden" name="profile_account_id" value="$profile_account_id"><input type="hidden" name="return" value="$return"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report</button></form>};
+            $profile_actions = qq{<div class="button-row">$follow_action$block$report</div>};
+        }
+    } elsif (!$account) {
+        $profile_actions = '<p class="muted">Sign in with an account to follow or report this profile.</p>';
+    }
+    my $posts = $blocked_profile
+        ? '<p class="muted">Unblock this profile to view visible posts.</p>'
+        : $self->_social_feed_cards(
+            $account,
+            $token,
+            profile_account_id => $profile->{account_id},
+            profile_handle     => $profile->{handle},
+            page               => _social_page_number($request->param('page')),
+            return_path        => '/social/@' . ($profile->{handle} || ''),
+            empty_message      => 'No visible posts for this profile yet.',
+        );
+    my $content = <<"HTML";
+<article class="content module-page social-page">
+  <p class="kicker">Social Profile</p>
+  <h1>$name</h1>
+  <p class="module-intro">\@$safe_handle</p>
+  <div class="docs-markdown">$bio</div>
+  $profile_actions
+  <section class="docs-grid">$posts</section>
+</article>
+HTML
+    return $self->_module_public_response($profile->{display_name} || $profile->{handle}, $profile->{bio}, '/social/@' . ($profile->{handle} || ''), $content, 'social');
+}
+
+sub _social_feed_cards {
+    my ($self, $account, $token, %args) = @_;
+    my $csrf = $account ? $self->{accounts}->csrf_token($token) : '';
+    my $viewer_id = $account ? int($account->{id} || 0) : 0;
+    my $mode = _social_feed_mode($args{feed_mode});
+    my $page = _social_page_number($args{page});
+    my $limit = int($args{limit} || 20);
+    $limit = 1 if $limit < 1;
+    $limit = 50 if $limit > 50;
+    return '<p class="muted">Sign in with an account to view followed profiles.</p>'
+        if $mode eq 'following' && !$account;
+    my %feed_args = (
+        limit             => $limit + 1,
+        page              => $page,
+        viewer_account_id => $viewer_id,
+    );
+    $feed_args{profile_account_id} = int($args{profile_account_id})
+        if int($args{profile_account_id} || 0) > 0;
+    $feed_args{kind} = 'following'
+        if $mode eq 'following' && !int($args{profile_account_id} || 0);
+    my $posts = $self->{social}->feed(%feed_args);
+    my $has_next = @{$posts} > $limit ? 1 : 0;
+    pop @{$posts} if $has_next;
+    my $html = '';
+    for my $post (@{$posts}) {
+        my $author = escape_html($post->{display_name} || $post->{handle} || 'Account');
+        my $handle = escape_html($post->{handle} || '');
+        my $body = _plain_text_html($post->{body});
+        my $count = int($post->{reaction_count} || 0);
+        my $id = int($post->{id} || 0);
+        my $return = escape_html($args{return_path} || ($args{profile_account_id} ? ('/social/@' . ($post->{handle} || '')) : _social_feed_path(mode => $mode, page => $page)));
+        my $actions = '';
+        my $replies = '';
+        for my $reply (@{ $self->{social}->replies_for_post(post_id => $id, limit => 3, viewer_account_id => $account ? int($account->{id} || 0) : 0) }) {
+            my $reply_author = escape_html($reply->{display_name} || $reply->{handle} || 'Account');
+            my $reply_body = _plain_text_html($reply->{body});
+            my $reply_id = int($reply->{id} || 0);
+            my $reply_actions = '';
+            if ($account) {
+                my $reply_report = qq{<form method="post" action="/social/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="kind" value="reply"><input type="hidden" name="reply_id" value="$reply_id"><input type="hidden" name="return" value="$return"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report</button></form>};
+                my $reply_delete = '';
+                my ($can_delete_reply) = $self->{social}->can_delete_reply(reply => $reply, account_id => $viewer_id);
+                if ($can_delete_reply) {
+                    $reply_delete = qq{<form method="post" action="/social/replies/delete" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="reply_id" value="$reply_id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Delete</button></form>};
+                }
+                $reply_actions = qq{<div class="button-row">$reply_report$reply_delete</div>};
+            }
+            $replies .= qq{<article class="social-reply"><strong>$reply_author</strong>$reply_body$reply_actions</article>};
+        }
+        $replies = qq{<section class="social-replies">$replies</section>} if length $replies;
+        if ($account) {
+            my $react = qq{<form method="post" action="/social/react" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="post_id" value="$id"><input type="hidden" name="reaction" value="like"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Like</button></form>};
+            my $report = qq{<form method="post" action="/social/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="kind" value="post"><input type="hidden" name="post_id" value="$id"><input type="hidden" name="return" value="$return"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report</button></form>};
+            my $delete = '';
+            my ($can_delete_post) = $self->{social}->can_delete_post(post => $post, account_id => $viewer_id);
+            if ($can_delete_post) {
+                $delete = qq{<form method="post" action="/social/posts/delete" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="post_id" value="$id"><input type="hidden" name="return" value="$return"><button type="submit" class="button-link secondary button-link--compact">Delete</button></form>};
+            }
+            my $reply = qq{<form method="post" action="/social/replies/create" class="member-form social-reply-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="post_id" value="$id"><input type="hidden" name="return" value="$return"><label><span>Reply</span><input name="body" maxlength="2000" required></label><button type="submit">Reply</button></form>};
+            $actions = qq{<div class="button-row">$react$report$delete</div>$reply};
+        }
+        $html .= <<"HTML";
+<article class="doc-card">
+  <h3>$author</h3>
+  <p><a href="/social/\@$handle">\@$handle</a></p>
+  $body
+  <small>$count reactions</small>
+  $actions
+  $replies
+</article>
+HTML
+    }
+    my $pager = _social_feed_pager(
+        mode           => $mode,
+        page           => $page,
+        has_next       => $has_next,
+        profile_handle => $args{profile_handle},
+    );
+    return ($html || '<p class="muted">' . escape_html($args{empty_message} || ($mode eq 'following' ? 'No followed-profile posts yet.' : 'No social posts yet.')) . '</p>') . $pager;
+}
+
+sub _social_feed_mode {
+    my ($value) = @_;
+    $value = lc($value || 'global');
+    return $value eq 'following' ? 'following' : 'global';
+}
+
+sub _social_page_number {
+    my ($value) = @_;
+    return 1 unless defined($value) && "$value" =~ /\A[0-9]+\z/;
+    my $page = int($value);
+    return $page > 1 ? $page : 1;
+}
+
+sub _social_feed_path {
+    my (%args) = @_;
+    my $mode = _social_feed_mode($args{mode});
+    my $page = _social_page_number($args{page});
+    my $path = '/social?feed=' . $mode;
+    $path .= '&page=' . $page if $page > 1;
+    return $path;
+}
+
+sub _social_feed_controls {
+    my ($mode, $signed_in) = @_;
+    my $global_current = $mode eq 'global' ? ' aria-current="page"' : '';
+    my $following_current = $mode eq 'following' ? ' aria-current="page"' : '';
+    my $following = $signed_in
+        ? qq{<a class="button-link secondary" href="/social?feed=following"$following_current>Following</a>}
+        : qq{<a class="button-link secondary" href="/account/login" aria-disabled="true">Following</a>};
+    return <<"HTML";
+<nav class="button-row social-feed-controls" aria-label="Social feed views">
+  <a class="button-link secondary" href="/social?feed=global"$global_current>Global</a>
+  $following
+</nav>
+HTML
+}
+
+sub _social_feed_pager {
+    my (%args) = @_;
+    my $page = _social_page_number($args{page});
+    my $has_next = $args{has_next} ? 1 : 0;
+    return '' unless $page > 1 || $has_next;
+    my $base = length($args{profile_handle} || '')
+        ? '/social/@' . $args{profile_handle}
+        : _social_feed_path(mode => $args{mode}, page => 1);
+    my $joiner = $base =~ /\?/ ? '&' : '?';
+    my $prev = '';
+    if ($page > 1) {
+        my $prev_page = $page - 1;
+        my $href = $prev_page > 1 ? ($base . $joiner . 'page=' . $prev_page) : $base;
+        $prev = '<a class="button-link secondary" href="' . escape_html($href) . '">Previous</a>';
+    }
+    my $next = '';
+    if ($has_next) {
+        my $href = $base . $joiner . 'page=' . ($page + 1);
+        $next = '<a class="button-link secondary" href="' . escape_html($href) . '">Next</a>';
+    }
+    return qq{<nav class="button-row social-feed-pager" aria-label="Social feed pagination">$prev$next</nav>};
+}
+
+sub _dispatch_live {
+    my ($self, $request) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return $self->_not_found unless DesertCMS::Modules::enabled($settings, 'live_streaming');
+    my $path = $request->{path} || '/live';
+    $path =~ s{/+\z}{};
+    $path = '/live' if $path eq '';
+    if ($path eq '/live/worker/health') {
+        return $request->{method} eq 'GET' ? $self->_live_worker_health($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/live/worker/auth') {
+        return $request->{method} eq 'POST' ? $self->_live_worker_auth($request) : $self->_method_not_allowed;
+    }
+    if ($path eq '/live/worker/heartbeat') {
+        return $request->{method} eq 'POST' ? $self->_live_worker_heartbeat($request) : $self->_method_not_allowed;
+    }
+    return $request->{method} eq 'GET' ? $self->_live_home($request) : $self->_method_not_allowed
+        if $path eq '/live';
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)\z}) {
+        return $request->{method} eq 'GET' ? $self->_live_channel_page($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)/presence\z}) {
+        return $request->{method} eq 'POST' ? $self->_live_presence_update($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)/presence/leave\z}) {
+        return $request->{method} eq 'POST' ? $self->_live_presence_leave($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)/chat\z}) {
+        return $request->{method} eq 'POST' ? $self->_live_chat_create($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)/chat/delete\z}) {
+        return $request->{method} eq 'POST' ? $self->_live_chat_delete($request, $1) : $self->_method_not_allowed;
+    }
+    if ($path =~ m{\A/live/([A-Za-z0-9-]+)/chat/report\z}) {
+        return $request->{method} eq 'POST' ? $self->_live_chat_report($request, $1) : $self->_method_not_allowed;
+    }
+    return $self->_not_found;
+}
+
+sub _live_home {
+    my ($self, $request) = @_;
+    my $cards = '';
+    for my $channel (@{ $self->{live_streaming}->channels }) {
+        my $title = escape_html($channel->{title} || 'Live channel');
+        my $slug = escape_html($channel->{slug} || '');
+        my $description = escape_html($channel->{description} || '');
+        my $status = escape_html($channel->{status} || 'offline');
+        $cards .= qq{<a class="doc-card" href="/live/$slug"><h3>$title</h3><p>$description</p><small>$status</small></a>};
+    }
+    $cards ||= '<p class="muted">No live channels are scheduled yet.</p>';
+    my $content = <<"HTML";
+<article class="content module-page live-page">
+  <p class="kicker">Live</p>
+  <h1>Live Streams</h1>
+  <p class="module-intro">OBS-compatible channels, HLS playback, schedules, stream keys, live chat, and moderation.</p>
+  <section class="docs-grid">$cards</section>
+</article>
+HTML
+    return $self->_module_public_response('Live Streams', 'Live stream channels.', '/live', $content, 'live');
+}
+
+sub _live_channel_page {
+    my ($self, $request, $slug, $message) = @_;
+    my $channel = $self->{live_streaming}->channel_by_slug($slug);
+    return $self->_not_found unless $channel && ($channel->{status} || '') ne 'disabled';
+    my ($account, $token) = $self->_account_session($request);
+    my $session = $self->{live_streaming}->active_session_for_channel($channel->{id});
+    my $title = escape_html($channel->{title} || 'Live channel');
+    my $description = escape_html($channel->{description} || '');
+    my $status = escape_html($channel->{status} || 'offline');
+    my $hls = escape_html($channel->{hls_path} || '');
+    my $player = $hls
+        ? qq{<video controls playsinline preload="metadata" src="$hls"></video>}
+        : '<p class="muted">No HLS playback path is configured for this channel.</p>';
+    my $notice = $message ? '<p class="notice">' . escape_html($message) . '</p>' : '';
+    my $chat = '<p class="muted">Chat opens when a live session is active.</p>';
+    if ($session && $channel->{chat_enabled}) {
+        my $messages = '';
+        for my $msg (@{ $self->{live_streaming}->chat_messages($session->{id}, limit => 40) }) {
+            my $name = escape_html($msg->{account_display_name} || $msg->{display_name} || $msg->{username} || 'Viewer');
+            my $body = _plain_text_html($msg->{body});
+            my $message_id = int($msg->{id} || 0);
+            my $report = '';
+            my $delete = '';
+            if ($account) {
+                my $csrf = $self->{accounts}->csrf_token($token);
+                my $safe_slug = escape_html($channel->{slug} || '');
+                $report = qq{<form method="post" action="/live/$safe_slug/chat/report" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="message_id" value="$message_id"><input name="reason" maxlength="500" placeholder="Report reason"><button type="submit" class="button-link secondary button-link--compact">Report</button></form>};
+                my ($can_delete) = $self->{live_streaming}->can_delete_own_chat_message(message => $msg, account_id => $account->{id});
+                if ($can_delete) {
+                    $delete = qq{<form method="post" action="/live/$safe_slug/chat/delete" class="inline-form"><input type="hidden" name="csrf_token" value="$csrf"><input type="hidden" name="message_id" value="$message_id"><button type="submit" class="button-link secondary button-link--compact">Delete</button></form>};
+                }
+            }
+            $messages .= qq{<article class="doc-card"><h3>$name</h3>$body<div class="button-row">$report$delete</div></article>};
+        }
+        $messages ||= '<p class="muted">No chat messages yet.</p>';
+        my $form = '<p class="muted">Sign in with an account to chat.</p>';
+        if ($account) {
+            my $csrf = $self->{accounts}->csrf_token($token);
+            my $safe_slug = escape_html($channel->{slug} || '');
+            $form = <<"HTML";
+<form method="post" action="/live/$safe_slug/chat" class="member-form">
+  <input type="hidden" name="csrf_token" value="$csrf">
+  <label><span>Message</span><input name="body" maxlength="1000" required></label>
+  <button type="submit">Send</button>
+</form>
+HTML
+        }
+        $chat = qq{<section class="docs-grid">$messages</section>$form};
+    }
+    my $content = <<"HTML";
+<article class="content module-page live-page members-page">
+  <p class="kicker">Live Stream</p>
+  <h1>$title</h1>
+  <p class="module-intro">$description</p>
+  $notice
+  <p><span class="status-pill">$status</span></p>
+  $player
+  <section class="docs-audience-group">
+    <h2 class="docs-audience-heading">Live Chat</h2>
+    $chat
+  </section>
+</article>
+HTML
+    return $self->_module_public_response($channel->{title}, $channel->{description}, '/live/' . ($channel->{slug} || ''), $content, 'live');
+}
+
+sub _live_chat_create {
+    my ($self, $request, $slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $channel = $self->{live_streaming}->channel_by_slug($slug);
+    return $self->_not_found unless $channel && $channel->{chat_enabled};
+    my $session = $self->{live_streaming}->active_session_for_channel($channel->{id});
+    return $self->_live_channel_page($request, $slug, 'Chat opens when the stream is live.') unless $session;
+    eval {
+        $self->{live_streaming}->add_chat_message(
+            session_id        => $session->{id},
+            account_id        => $account->{id},
+            display_name      => $account->{display_name} || $account->{username},
+            body              => $request->param('body'),
+            realtime_publish  => $self->_realtime_publish_adapter,
+        );
+        1;
+    } or return $self->_live_channel_page($request, $slug, $@ || 'The chat message could not be saved.');
+    return DesertCMS::HTTP->redirect('/live/' . ($channel->{slug} || $slug), { security_headers() });
+}
+
+sub _live_chat_report {
+    my ($self, $request, $slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $channel = $self->{live_streaming}->channel_by_slug($slug);
+    return $self->_not_found unless $channel && $channel->{chat_enabled};
+    eval {
+        $self->{live_streaming}->report_chat_message(
+            message_id          => $request->param('message_id'),
+            reporter_account_id => $account->{id},
+            reason              => $request->param('reason'),
+        );
+        1;
+    } or return $self->_live_channel_page($request, $slug, $@ || 'The chat report could not be saved.');
+    return DesertCMS::HTTP->redirect('/live/' . ($channel->{slug} || $slug), { security_headers() });
+}
+
+sub _live_chat_delete {
+    my ($self, $request, $slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    return DesertCMS::HTTP->redirect('/account/login', { security_headers() }) unless $account;
+    return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    my $channel = $self->{live_streaming}->channel_by_slug($slug);
+    return $self->_not_found unless $channel && $channel->{chat_enabled};
+    my $deleted = eval {
+        $self->{live_streaming}->delete_own_chat_message(
+            id                => $request->param('message_id'),
+            account_id        => $account->{id},
+            channel_id        => $channel->{id},
+            realtime_publish  => $self->_realtime_publish_adapter,
+        );
+    };
+    return DesertCMS::HTTP->redirect('/live/' . ($channel->{slug} || $slug), { security_headers() }) if $deleted;
+    return $self->_live_channel_page($request, $slug, $@ || 'The chat message could not be deleted.');
+}
+
+sub _live_presence_update {
+    my ($self, $request, $slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    if ($account) {
+        return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    }
+    my $result = eval { $self->_live_presence_apply($request, $slug, $account, 'present') };
+    return $self->_json_response(400, { ok => 0, error => _clean_error($@ || 'live presence could not be updated') }) unless $result;
+    return $self->_json_response(200, { ok => 1, presence => $result });
+}
+
+sub _live_presence_leave {
+    my ($self, $request, $slug) = @_;
+    my ($account, $token) = $self->_account_session($request);
+    if ($account) {
+        return $self->_forbidden unless $self->{accounts}->verify_csrf($token, $request->param('csrf_token'));
+    }
+    my $result = eval { $self->_live_presence_apply($request, $slug, $account, 'left') };
+    return $self->_json_response(400, { ok => 0, error => _clean_error($@ || 'live presence could not be updated') }) unless $result;
+    return $self->_json_response(200, { ok => 1, presence => $result });
+}
+
+sub _live_presence_apply {
+    my ($self, $request, $slug, $account, $status) = @_;
+    my $json = $self->_request_json_payload($request);
+    my $channel = $self->{live_streaming}->channel_by_slug($slug);
+    die "live channel was not found" unless $channel && $channel->{chat_enabled};
+    my $session = $self->{live_streaming}->active_session_for_channel($channel->{id});
+    die "Chat opens when the stream is live." unless $session;
+    my $client_id = $request->param('client_id');
+    $client_id = $json->{client_id} if !defined($client_id) && exists $json->{client_id};
+    my $display_name = $request->param('display_name');
+    $display_name = $json->{display_name} if !defined($display_name) && exists $json->{display_name};
+    $status ||= $request->param('status');
+    $status = $json->{status} if !defined($status) && exists $json->{status};
+    return $self->{live_streaming}->update_chat_presence(
+        session_id        => $session->{id},
+        account_id        => $account ? $account->{id} : 0,
+        client_id         => $client_id,
+        display_name      => $display_name || ($account ? ($account->{display_name} || $account->{username}) : ''),
+        status            => $status || 'present',
+        realtime_publish  => $self->_realtime_publish_adapter,
+    );
+}
+
+sub _live_worker_health {
+    my ($self, $request) = @_;
+    return $self->_json_response(200, $self->{live_streaming}->worker_health);
+}
+
+sub _live_worker_auth {
+    my ($self, $request) = @_;
+    my %args = $self->_live_worker_args($request);
+    my $auth = eval { $self->{live_streaming}->worker_ingest_auth(%args) };
+    return $self->_json_response(403, { authorized => 0, error => _clean_error($@ || 'stream key was not accepted') }) unless $auth;
+    return $self->_json_response(200, $auth);
+}
+
+sub _live_worker_heartbeat {
+    my ($self, $request) = @_;
+    my %args = $self->_live_worker_args($request);
+    my $result = eval { $self->{live_streaming}->record_worker_ingest_heartbeat(%args, realtime_publish => $self->_realtime_publish_adapter) };
+    return $self->_json_response(403, { authorized => 0, error => _clean_error($@ || 'worker heartbeat was rejected') }) unless $result;
+    return $self->_json_response(200, $result);
+}
+
+sub _realtime_publish_adapter {
+    my ($self) = @_;
+    my $settings = DesertCMS::Settings::all($self->{config}, $self->{db});
+    return undef unless _setting_truthy($settings->{realtime_enabled});
+    return sub {
+        my ($event) = @_;
+        return DesertCMS::Realtime->publish($self->{config}, $event);
+    };
+}
+
+sub _live_worker_args {
+    my ($self, $request) = @_;
+    my $json = $self->_request_json_payload($request);
+    my @keys = qw(
+        channel_id channel_slug slug name stream stream_name stream_key key token session_id session_title
+        worker_id worker_status heartbeat_status status session_status hls_output_path hls_path
+        viewer_count ingest_source message
+    );
+    my %args;
+    for my $key (@keys) {
+        my $value = $request->param($key);
+        $value = $json->{$key} if !defined($value) && exists($json->{$key});
+        $args{$key} = $value if defined $value;
+    }
+    $args{stream_key} = $args{key} if !defined($args{stream_key}) && defined($args{key});
+    return %args;
+}
+
+sub _module_public_response {
+    my ($self, $title, $description, $path, $content, $context, $status) = @_;
+    return DesertCMS::HTTP->response(
+        status  => $status || 200,
+        headers => {
+            'Content-Type' => 'text/html; charset=utf-8',
+            security_headers(),
+        },
+        body => DesertCMS::Renderer::render_module_page($self->{config}, $self->{db}, {
+            title       => $title,
+            description => $description,
+            path        => $path,
+            context     => $context || 'module',
+            content     => $content,
+        }),
+    );
+}
+
+sub _plain_text_html {
+    my ($value) = @_;
+    my $html = escape_html($value || '');
+    $html =~ s{\n\n+}{</p><p>}g;
+    $html =~ s{\n}{<br>}g;
+    return "<p>$html</p>";
+}
+
 sub _members_home {
     my ($self, $request, $message) = @_;
     my ($member, $token) = $self->_member_session($request);
@@ -18813,6 +23296,27 @@ sub _send_member_password_reset_email {
         $self->{db},
         to         => $email,
         email_type => 'member_password_reset',
+        subject    => $subject,
+        text_body  => $text,
+        html_body  => $html,
+    );
+}
+
+sub _send_account_password_reset_email {
+    my ($self, $email, $url) = @_;
+    my $site_name = DesertCMS::Settings::all($self->{config}, $self->{db})->{site_name} || 'DesertCMS';
+    my $subject = "Reset your $site_name account password";
+    my $text = join "\n\n", "A password reset was requested for your $site_name account.", 'Choose a new password here:', $url, 'If you did not request this, ignore this email.';
+    my $html = '<p>A password reset was requested for your '
+        . escape_html($site_name)
+        . ' account.</p><p><a href="'
+        . escape_html($url)
+        . '">Choose a new password</a></p><p>If you did not request this, ignore this email.</p>';
+    return send_postmark(
+        $self->{config},
+        $self->{db},
+        to         => $email,
+        email_type => 'account_password_reset',
         subject    => $subject,
         text_body  => $text,
         html_body  => $html,
@@ -19815,6 +24319,8 @@ sub _font_select_options {
     if (!$seen{$selected}) {
         my $label = $selected =~ /\Apkg:([A-Za-z0-9._+-]+)\z/
             ? 'Selected package: ' . $1 . ' (not installed yet)'
+            : $selected =~ /\Abundled:space-grotesk\z/
+                ? 'Space Grotesk (bundled)'
             : $selected;
         push @pairs, [ $selected, $label ];
     }
@@ -20027,6 +24533,32 @@ sub _clean_theme_preset {
         return $preset->{id} if defined $value && $value eq $preset->{id};
     }
     return $mode eq 'dark' ? 'dark-archive' : 'light-archive';
+}
+
+sub _apply_theme_preset_recommended_fonts {
+    my ($values, $current_settings) = @_;
+    return unless $values && ref $values eq 'HASH';
+    my %recommended;
+    for my $id ($values->{theme_light_preset}, $values->{theme_dark_preset}) {
+        my $fonts = DesertCMS::SiteTheme::recommended_fonts_for_preset($id);
+        next unless $fonts && ref $fonts eq 'HASH';
+        @recommended{keys %{$fonts}} = values %{$fonts};
+    }
+    return unless %recommended;
+
+    my %defaults = (
+        theme_heading_font => 'serif',
+        theme_body_font    => 'serif',
+        theme_ui_font      => 'sans',
+    );
+    for my $key (qw(theme_heading_font theme_body_font theme_ui_font)) {
+        next unless exists $recommended{$key};
+        my $current = DesertCMS::FontPackages::clean_font_id(($current_settings || {})->{$key}, $defaults{$key});
+        my $submitted = DesertCMS::FontPackages::clean_font_id($values->{$key}, $defaults{$key});
+        next unless $current eq $defaults{$key};
+        next unless $submitted eq $defaults{$key};
+        $values->{$key} = DesertCMS::FontPackages::clean_font_id($recommended{$key}, $defaults{$key});
+    }
 }
 
 sub _clean_theme_color {
@@ -22102,8 +26634,12 @@ sub _admin_primary_nav {
         [ analytics => '/admin',          'Analytics', 'view_home' ],
         [ editor    => '/admin/editor',   'Editor',    'view_content' ],
         [ modules   => '/admin/settings/modules', 'Modules', 'view_features' ],
+        [ accounts  => '/admin/accounts', 'Accounts', 'view_features' ],
+        [ notifications => '/admin/notifications', 'Notifications', 'view_notifications' ],
+        [ security  => '/admin/settings/security', 'Security', 'view_security_center' ],
         [ backups   => '/admin/backups',  'Backups',   'view_operations' ],
     );
+    my $settings = eval { DesertCMS::Settings::all($self->{config}, $self->{db}) } || {};
     if (DesertCMS::Commerce::is_contributor_instance($self->{config})) {
         push @links, [ billing => '/admin/billing', 'Billing', 'view_usage' ];
     }
@@ -22113,6 +26649,7 @@ sub _admin_primary_nav {
     my $html = '<nav class="admin-primary-nav" id="admin-primary-nav" aria-label="Admin sections">';
     for my $link (@links) {
         my ($key, $href, $label, $capability) = @{$link};
+        next if $key eq 'accounts' && !DesertCMS::Modules::enabled($settings, 'accounts');
         next if $capability
             && !DesertCMS::CapabilityPolicy::has($self->{config}, $role, $capability);
         my $class = $key eq $active ? ' class="active" aria-current="page"' : '';
@@ -22149,10 +26686,12 @@ sub _contributor_product_nav_links {
         [ home         => '/admin',        'Home',         'view_home' ],
         [ site_builder => '/admin/editor', 'Site Builder', 'view_content' ],
         [ pages        => '/admin/pages',  'Pages',        'view_content' ],
-        [ posts        => '/admin/posts',  'Posts',        'view_content' ],
         [ media        => '/admin/media',  'Media',        'view_media' ],
     );
+    splice @core, 3, 0, [ posts => '/admin/posts', 'Posts', 'view_content' ]
+        if DesertCMS::Modules::enabled($settings, 'posts');
     my @manage = (
+        [ notifications => '/admin/notifications', 'Notifications', 'view_notifications' ],
         [ billing => '/admin/billing',          'Billing', 'view_usage' ],
         [ account => '/admin/settings/account', 'Account', 'manage_account' ],
         [ help    => '/admin/help',             'Help',    'view_home' ],
@@ -22171,10 +26710,13 @@ sub _contributor_product_nav_links {
 sub _admin_primary_nav_active_key {
     my ($title) = @_;
     return 'analytics' if $title eq 'Analytics';
+    return 'accounts' if $title eq 'Accounts';
+    return 'notifications' if $title eq 'Notifications';
+    return 'security' if $title eq 'Security Center';
     return 'backups' if $title eq 'Backups';
     return 'modules' if _module_surface_title($title);
     return 'billing' if $title eq 'Billing';
-    return 'settings' if $title =~ /\A(?:Settings|Master Control|Provisioning Job|Admin Account|Governance|Federated Content Review|Contributors|Contributor Request|Contributor Blueprints|Service Plans|Contributor Sites|Upgrade DesertCMS|Operations and Recovery)\b/;
+    return 'settings' if $title =~ /\A(?:Settings|Dashboard Settings|Master Control|Provisioning Job|Admin Account|Governance|Federated Content Review|Contributors|Contributor Request|Contributor Blueprints|Service Plans|Contributor Sites|Realtime Service|Upgrade DesertCMS|Operations and Recovery)\b/;
     return 'editor' if $title =~ /\A(?:Editor|Templates|Sections|Post Comments|Media|Navigation|Redirects|Theme|Site Settings|Rebuild Complete)\b/;
     return '';
 }
@@ -22182,6 +26724,8 @@ sub _admin_primary_nav_active_key {
 sub _contributor_primary_nav_active_key {
     my ($title) = @_;
     return 'home' if $title eq 'Home' || $title eq 'Analytics';
+    return 'notifications' if $title eq 'Notifications';
+    return 'home' if $title eq 'Dashboard Settings';
     return 'pages' if $title =~ /\APages\b/;
     return 'posts' if $title =~ /\APosts\b/;
     return 'media' if $title =~ /\AMedia\b/;
@@ -22197,7 +26741,7 @@ sub _contributor_primary_nav_active_key {
 sub _module_surface_title {
     my ($title) = @_;
     return 0 unless defined $title && length $title;
-    return $title =~ /\A(?:Features|Modules|Shop|Shop \/ Catalog|Events|Directory|Bookings|Bookings \/ Appointments|Membership|Membership \/ Gated Content|Newsletter|Donations|Donations \/ Fundraising|Testimonials|Testimonials \/ Reviews|Map Module|Map Feature|Map \/ Locations Module|Map \/ Locations Feature|Gallery Module|Gallery Feature|Showcase Module|Showcase Feature|Forms Module|Forms Feature|Documentation Module|Documentation Feature|Docs \/ Resource Hub Module|Docs \/ Resource Hub Feature)\b/ ? 1 : 0;
+    return $title =~ /\A(?:Features|Modules|Posts|Accounts|Live Streaming|Forums|Social|Notifications Module|Notifications Feature|Security Center Module|Security Center Feature|Shop|Shop \/ Catalog|Events|Directory|Bookings|Bookings \/ Appointments|Membership|Membership \/ Gated Content|Newsletter|Donations|Donations \/ Fundraising|Testimonials|Testimonials \/ Reviews|Map Module|Map Feature|Map \/ Locations Module|Map \/ Locations Feature|Gallery Module|Gallery Feature|Showcase Module|Showcase Feature|Forms Module|Forms Feature|Documentation Module|Documentation Feature|Docs \/ Resource Hub Module|Docs \/ Resource Hub Feature)\b/ ? 1 : 0;
 }
 
 sub _admin_brand_html {
@@ -22228,11 +26772,13 @@ sub _admin_css_cache_key {
         theme_custom_accent theme_custom_accent_dark theme_custom_support theme_custom_button_ink
         theme_heading_font theme_body_font theme_ui_font theme_heading_scale theme_body_scale
         theme_button_style theme_button_radius theme_card_style theme_card_radius
+        theme_unsplash_enabled unsplash_access_key theme_background_effect theme_motion_effect theme_lighting_effect
+        theme_box_transparency theme_outline_transparency theme_box_shape theme_gradient_style
         site_background_image_path site_content_width site_spacing_scale site_logo_size site_logo_fit
         site_logo_focal_x site_logo_focal_y site_logo_max_width_px site_logo_max_height_px
     );
     my $fingerprint = join "\0", map { $_ . '=' . ($settings->{$_} // '') } @keys;
-    return '20260705d-' . substr(sha256_hexstr($fingerprint), 0, 12);
+    return '20260706a-' . substr(sha256_hexstr($fingerprint), 0, 12);
 }
 
 sub _map_tile_origins {
@@ -22271,6 +26817,21 @@ body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Se
 .topbar nav a.active,
 .topbar nav a[aria-current="page"] { background: var(--field); color: var(--accent); }
 .shell { width: min(1400px, calc(100% - 32px)); margin: 32px auto; }
+@media (min-width: 981px) {
+  body.has-admin-nav { min-height: 100vh; }
+  body.has-admin-nav .topbar { position: fixed; inset: 0 auto 0 0; z-index: 50; width: 248px; min-height: 100vh; align-items: stretch; justify-content: flex-start; flex-direction: column; gap: 16px; padding: 18px; border-right: 1px solid var(--line); border-bottom: 0; overflow: auto; box-shadow: 8px 0 28px rgba(16, 32, 51, 0.06); }
+  body.has-admin-nav .brand { width: 100%; min-height: 42px; align-items: center; padding: 0 4px; }
+  body.has-admin-nav .admin-brand-logo { width: 100%; max-width: 184px; object-position: left center; }
+  body.has-admin-nav .topbar-actions { flex: 1 1 auto; min-width: 0; align-items: stretch; justify-content: flex-start; flex-direction: column; gap: 12px; }
+  body.has-admin-nav .topbar nav { display: grid; grid-template-columns: 1fr; align-items: stretch; justify-content: stretch; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+  body.has-admin-nav .topbar nav a { width: 100%; min-height: 40px; justify-content: flex-start; padding: 0 12px; background: var(--panel); }
+  body.has-admin-nav .theme-toggle { margin-top: auto; align-self: flex-start; }
+  body.has-admin-nav .shell { width: min(1400px, calc(100% - 304px)); margin: 32px 32px 32px 280px; }
+  body.admin-product-mode--contributor.has-admin-nav .contributor-topbar { min-height: 100vh; align-items: stretch; }
+  body.admin-product-mode--contributor.has-admin-nav .contributor-topbar .brand { max-width: 100%; white-space: normal; }
+  body.admin-product-mode--contributor.has-admin-nav .contributor-topbar-actions { flex: 1 1 auto; }
+  body.admin-product-mode--contributor.has-admin-nav .contributor-product-nav { max-width: none; display: grid; grid-template-columns: 1fr; justify-content: stretch; }
+}
 .panel { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 28px; box-shadow: var(--shadow); }
 .auth-panel { max-width: 420px; margin: 72px auto; }
 .auth-help { margin: 14px 0 0; font-size: 14px; }
@@ -22286,6 +26847,21 @@ body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Se
 .dashboard-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .dashboard-hero--compact { align-items: center; padding: 24px; }
 .dashboard-hero .actions { justify-content: flex-end; }
+.dashboard-controls { min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.dashboard-controls nav { min-width: 0; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.dashboard-controls a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 900; text-decoration: none; }
+.dashboard-controls a:hover,
+.dashboard-controls a.active,
+.dashboard-controls a[aria-current="page"] { background: var(--panel); color: var(--accent); }
+.dashboard-widget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 12px; align-items: stretch; }
+.dashboard-widget { min-width: 0; display: grid; gap: 8px; min-height: 126px; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; box-shadow: var(--shadow); }
+.dashboard-widget:hover { border-color: var(--accent); }
+.dashboard-widget span { color: var(--accent); font-size: 11px; font-weight: 900; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.08em; }
+.dashboard-widget strong { min-width: 0; font-size: 22px; line-height: 1.1; overflow-wrap: anywhere; }
+.dashboard-widget small { align-self: end; color: var(--muted); font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+.dashboard-widget--small { min-height: 110px; }
+.dashboard-widget--large,
+.dashboard-widget--wide { grid-column: span 2; }
 .dashboard-health-strip { display: grid; grid-template-columns: minmax(170px, 0.22fr) minmax(0, 1fr); gap: 14px; align-items: stretch; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .dashboard-health-title { display: grid; align-content: center; gap: 4px; min-width: 0; padding-right: 14px; border-right: 1px solid var(--line); }
 .dashboard-health-title span { color: var(--accent); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -22408,6 +26984,7 @@ body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Se
 .status-pill { box-sizing: border-box; max-width: 100%; min-width: 0; display: inline-flex; align-items: center; justify-content: center; min-height: 26px; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 800; line-height: 1.2; text-align: center; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .status-pill.ok { color: var(--ok-ink); background: var(--ok-bg); }
 .status-pill.warn { color: var(--warn-ink); background: var(--warn-bg); }
+.status-pill.danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--field)); border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line)); }
 .status-pill--neutral { color: var(--muted); background: var(--field); border: 1px solid var(--line); }
 .master-control-overview { display: grid; grid-template-columns: minmax(220px, 0.85fr) minmax(0, 2.15fr); gap: 12px; align-items: stretch; margin: 18px 0 14px; }
 .master-control-score { min-width: 0; display: grid; gap: 8px; align-content: center; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
@@ -23003,7 +27580,7 @@ form.is-submitting { cursor: progress; }
 .theme-preview-nav--underline a:first-child { color: var(--accent); border-bottom-color: var(--accent); }
 .theme-preview-nav--pills a { padding: 0 10px; background: var(--field); color: var(--ink); }
 .theme-preview-nav--buttons a { min-height: 34px; padding: 0 12px; border: 1px solid var(--site-button-border); background: var(--site-button-bg); color: var(--site-button-color); box-shadow: var(--site-button-shadow); }
-.theme-preview-main { min-width: 0; display: grid; gap: 18px; padding: 34px; background: var(--paper); font: var(--preview-body-size)/var(--preview-body-line) var(--preview-body-font); }
+.theme-preview-main { min-width: 0; display: grid; gap: 18px; padding: 34px; background: var(--paper); background-image: var(--site-background-overlay, none), var(--site-gradient-bg, none); background-blend-mode: var(--site-background-blend-mode, normal); font: var(--preview-body-size)/var(--preview-body-line) var(--preview-body-font); }
 .theme-preview-kicker { margin: 0; color: var(--accent); font: 900 var(--preview-ui-size)/1 var(--preview-ui-font); text-transform: uppercase; letter-spacing: 0.08em; }
 .theme-preview-main h1 { max-width: 9ch; margin: 0; color: var(--ink); font: 900 clamp(30px, var(--preview-h1-size), 58px)/1.02 var(--preview-heading-font); letter-spacing: 0; overflow-wrap: anywhere; }
 .theme-preview-copy { max-width: 56ch; margin: 0; color: var(--muted); overflow-wrap: anywhere; }
@@ -23011,7 +27588,8 @@ form.is-submitting { cursor: progress; }
 .theme-preview-button { min-height: 42px; display: inline-flex; align-items: center; border: 1px solid var(--site-button-border); border-radius: var(--site-button-radius); padding: 0 16px; background: var(--site-button-bg); color: var(--site-button-color); box-shadow: var(--site-button-shadow); font-weight: 900; text-decoration: none; }
 .theme-preview-text-link { color: var(--support); font-weight: 900; text-decoration: none; }
 .theme-preview-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.theme-preview-card { min-width: 0; display: grid; gap: 7px; padding: 14px; border: 1px solid var(--site-card-border); border-radius: var(--site-card-radius); background: var(--site-card-bg); box-shadow: var(--site-card-shadow); overflow: hidden; }
+.theme-preview-card { min-width: 0; display: grid; gap: 7px; padding: 14px; border: 1px solid var(--site-card-border); border-radius: var(--site-box-radius, var(--site-card-radius)); background: var(--site-card-bg); box-shadow: var(--site-card-shadow); overflow: hidden; transition: transform var(--site-motion-duration, 0ms) ease, box-shadow var(--site-motion-duration, 0ms) ease; }
+.theme-preview-card:hover { transform: var(--site-hover-transform, none); box-shadow: var(--site-lighting-shadow, var(--site-card-shadow)); }
 .theme-preview-card span,
 .theme-preview-type-samples span { color: var(--accent); font: 900 11px/1 var(--preview-ui-font); text-transform: uppercase; letter-spacing: 0.08em; }
 .theme-preview-card strong { color: var(--ink); font: 900 clamp(18px, var(--preview-h2-size), 28px)/1.1 var(--preview-heading-font); overflow-wrap: anywhere; }
@@ -23352,6 +27930,27 @@ form.is-submitting { cursor: progress; }
 .module-card-actions { min-width: 0; display: grid; justify-items: end; gap: 12px; }
 .module-card-actions .checkbox-field { margin: 0; }
 .module-lock-note { color: var(--muted); font-size: 12px; font-weight: 800; text-align: right; text-transform: uppercase; letter-spacing: 0.08em; }
+.v3-contract-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; align-items: start; }
+.v3-contract-grid > div { min-width: 0; display: grid; align-content: start; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.v3-contract-grid h3 { margin: 0; font-size: 14px; line-height: 1.25; letter-spacing: 0; }
+.v3-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; align-items: start; }
+.v3-provider-grid fieldset { min-width: 0; display: grid; gap: 12px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.v3-provider-grid legend { padding: 0 4px; color: var(--ink); font-size: 14px; font-weight: 800; letter-spacing: 0; }
+.v3-provider-grid label { margin: 0; }
+.v3-manifest-list { min-width: 0; display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.v3-manifest-list li { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow-wrap: anywhere; }
+.v3-manifest-list code { white-space: normal; overflow-wrap: anywhere; }
+.v3-manifest-list--objects article { min-width: 0; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.v3-manifest-list--objects strong { min-width: 0; overflow-wrap: anywhere; }
+.v3-manifest-list--objects dl { display: grid; gap: 6px; margin: 0; }
+.v3-manifest-list--objects dl div { min-width: 0; display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px; align-items: start; }
+.v3-manifest-list--objects dt { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; }
+.v3-manifest-list--objects dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.dashboard-widget-option-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; align-items: stretch; }
+.dashboard-widget-option { min-width: 0; display: grid; gap: 12px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.dashboard-widget-option .checkbox-field { margin: 0; align-items: start; }
+.dashboard-widget-option .field-row { gap: 10px; }
+.dashboard-widget-option .status-pill { justify-self: start; }
 .checkbox-field small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.35; text-transform: none; letter-spacing: 0; }
 .notice { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; margin: 0 0 18px; background: var(--field); color: var(--ink); line-height: 1.45; overflow-wrap: anywhere; }
 .notice > * { min-width: 0; max-width: 100%; }
@@ -23449,6 +28048,8 @@ body.has-admin-modal { overflow: hidden; }
   .trend-day small { display: none; }
   .rank-row { grid-template-columns: minmax(0, 1fr) 64px 34px; gap: 8px; }
   .theme-mode-grid, .theme-choice-grid, .template-choice-grid, .workflow-grid, .media-grid, .color-grid, .layout-control-grid, .shop-admin-grid, .price-grid, .module-card, .upgrade-form, .search-engine-grid, .indexing-submit-row, .contributor-suggestion-list li { grid-template-columns: 1fr; }
+  .dashboard-widget--large,
+  .dashboard-widget--wide { grid-column: auto; }
   .theme-builder-preview-toolbar { align-items: stretch; }
   .theme-builder-preview-toolbar .status-pill { justify-content: center; }
   .theme-preview-stage,
@@ -24878,10 +29479,34 @@ sub _editor_js {
         raised: { bg: 'var(--panel)', border: 'color-mix(in srgb, var(--line) 76%, transparent)', shadow: '0 14px 34px rgba(16, 32, 51, 0.12)' }
       };
       var cardRadii = { square: '0px', soft: '8px', round: '16px' };
+      var backgroundEffects = {
+        none: { overlay: 'none', blend: 'normal' },
+        wash: { overlay: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%, color-mix(in srgb, var(--support) 8%, transparent))', blend: 'normal' },
+        grain: { overlay: 'repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink) 4%, transparent) 0 1px, transparent 1px 7px)', blend: 'normal' },
+        vignette: { overlay: 'radial-gradient(ellipse at center, transparent 42%, color-mix(in srgb, var(--ink) 16%, transparent) 100%)', blend: 'normal' }
+      };
+      var motionEffects = {
+        none: { duration: '0ms', transform: 'none' },
+        subtle: { duration: '160ms', transform: 'translateY(-1px)' },
+        lift: { duration: '240ms', transform: 'translateY(-3px)' }
+      };
+      var lightingEffects = {
+        none: { shadow: 'var(--site-card-shadow)' },
+        soft: { shadow: '0 18px 42px rgba(16, 32, 51, 0.14)' },
+        glow: { shadow: '0 18px 48px color-mix(in srgb, var(--accent) 22%, transparent)' }
+      };
+      var boxRadii = { square: '0px', soft: '8px', round: '18px', pill: '28px' };
+      var gradientStyles = {
+        none: { bg: 'none', accent: 'var(--accent)' },
+        accent: { bg: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--support) 12%, transparent))', accent: 'linear-gradient(135deg, var(--accent), var(--support))' },
+        split: { bg: 'linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 50%, color-mix(in srgb, var(--support) 12%, transparent))', accent: 'linear-gradient(90deg, var(--accent), var(--support))' },
+        sheen: { bg: 'linear-gradient(120deg, transparent, color-mix(in srgb, var(--panel) 36%, transparent), transparent)', accent: 'linear-gradient(120deg, var(--accent-dark), var(--accent), var(--support))' }
+      };
       var fontStacks = {
         serif: 'Georgia, "Times New Roman", serif',
         sans: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
+        mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+        'bundled:space-grotesk': '"Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
       };
       function cleanChoice(value, fallback, allowed) {
         value = String(value || '');
@@ -24930,6 +29555,16 @@ sub _editor_js {
           return '"' + cssString(family) + '", ' + generic;
         }
         return fontStacks[fallback] || fontStacks.sans;
+      }
+      function transparentMix(base, transparency) {
+        transparency = parseInt(transparency, 10);
+        transparency = isNaN(transparency) ? 0 : Math.max(0, Math.min(80, transparency));
+        var alpha = 100 - transparency;
+        base = String(base || 'var(--panel)');
+        if (alpha >= 100 || base === 'transparent') {
+          return base;
+        }
+        return 'color-mix(in srgb, ' + base + ' ' + alpha + '%, transparent)';
       }
       function optionLabel(field, fallback) {
         if (!field) {
@@ -25068,6 +29703,13 @@ sub _editor_js {
           var buttonRadius = cleanChoice(value('theme_button_radius', 'soft'), 'soft', ['square', 'soft', 'pill']);
           var cardStyle = cleanChoice(value('theme_card_style', 'outlined'), 'outlined', ['flat', 'outlined', 'raised']);
           var cardRadius = cleanChoice(value('theme_card_radius', 'soft'), 'soft', ['square', 'soft', 'round']);
+          var backgroundEffect = cleanChoice(value('theme_background_effect', 'none'), 'none', ['none', 'wash', 'grain', 'vignette']);
+          var motionEffect = cleanChoice(value('theme_motion_effect', 'none'), 'none', ['none', 'subtle', 'lift']);
+          var lightingEffect = cleanChoice(value('theme_lighting_effect', 'none'), 'none', ['none', 'soft', 'glow']);
+          var boxShape = cleanChoice(value('theme_box_shape', 'soft'), 'soft', ['square', 'soft', 'round', 'pill']);
+          var gradientStyle = cleanChoice(value('theme_gradient_style', 'none'), 'none', ['none', 'accent', 'split', 'sheen']);
+          var boxTransparency = intValue('theme_box_transparency', 0, 0, 80);
+          var outlineTransparency = intValue('theme_outline_transparency', 0, 0, 80);
           var footerLayout = cleanChoice(value('site_footer_layout', 'standard'), 'standard', ['standard', 'compact', 'minimal', 'hidden']);
           var footerOrder = cleanChoice(value('site_footer_order', 'brand-nav-credit'), 'brand-nav-credit', ['brand-nav-credit', 'nav-brand-credit', 'credit-brand-nav']);
           var headingField = field('theme_heading_font');
@@ -25075,6 +29717,10 @@ sub _editor_js {
           var uiField = field('theme_ui_font');
           var button = buttonStyles[buttonStyle] || buttonStyles.solid;
           var card = cardStyles[cardStyle] || cardStyles.outlined;
+          var background = backgroundEffects[backgroundEffect] || backgroundEffects.none;
+          var motion = motionEffects[motionEffect] || motionEffects.none;
+          var lighting = lightingEffects[lightingEffect] || lightingEffects.none;
+          var gradient = gradientStyles[gradientStyle] || gradientStyles.none;
           preview.style.setProperty('--preview-logo-max-width', logoWidth + 'px');
           preview.style.setProperty('--preview-logo-max-height', logoHeight + 'px');
           preview.style.setProperty('--preview-logo-fit', logoFit);
@@ -25095,10 +29741,18 @@ sub _editor_js {
           preview.style.setProperty('--site-button-color', button.color);
           preview.style.setProperty('--site-button-shadow', button.shadow);
           preview.style.setProperty('--site-button-radius', buttonRadii[buttonRadius] || buttonRadii.soft);
-          preview.style.setProperty('--site-card-bg', card.bg);
-          preview.style.setProperty('--site-card-border', card.border);
+          preview.style.setProperty('--site-card-bg', transparentMix(card.bg, boxTransparency));
+          preview.style.setProperty('--site-card-border', card.border === 'transparent' ? 'transparent' : transparentMix(card.border, outlineTransparency));
           preview.style.setProperty('--site-card-shadow', card.shadow);
           preview.style.setProperty('--site-card-radius', cardRadii[cardRadius] || cardRadii.soft);
+          preview.style.setProperty('--site-background-overlay', background.overlay);
+          preview.style.setProperty('--site-background-blend-mode', background.blend);
+          preview.style.setProperty('--site-motion-duration', motion.duration);
+          preview.style.setProperty('--site-hover-transform', motion.transform);
+          preview.style.setProperty('--site-lighting-shadow', lighting.shadow);
+          preview.style.setProperty('--site-box-radius', boxRadii[boxShape] || boxRadii.soft);
+          preview.style.setProperty('--site-gradient-bg', gradient.bg);
+          preview.style.setProperty('--site-accent-gradient', gradient.accent);
           Array.prototype.forEach.call(preview.querySelectorAll('[data-theme-preview-header]'), function (node) {
             setClassByPrefix(node, 'theme-preview-header--', headerLayout);
           });
@@ -26171,6 +30825,41 @@ sub _json_response {
         },
         body => $body,
     );
+}
+
+sub _request_json_payload {
+    my ($self, $request) = @_;
+    return {} unless $request && ($request->{content_type} || '') =~ m{application/json}i;
+    return {} unless length($request->{body} || '');
+    my $payload = eval { decode_json($request->{body}) };
+    return $payload && ref($payload) eq 'HASH' ? $payload : {};
+}
+
+sub _request_values {
+    my ($request, $key) = @_;
+    return () unless $request && defined $key && length $key;
+
+    my @values;
+    if (($request->{content_type} || '') =~ m{application/x-www-form-urlencoded}i && length($request->{body} || '')) {
+        for my $pair (split /&/, $request->{body}) {
+            my ($raw_key, $raw_value) = split /=/, $pair, 2;
+            next unless defined $raw_key;
+            next unless url_decode($raw_key) eq $key;
+            push @values, url_decode(defined $raw_value ? $raw_value : '');
+        }
+    }
+
+    if (!@values && ref($request->{form}) eq 'HASH' && exists $request->{form}{$key}) {
+        my $value = $request->{form}{$key};
+        @values = ref($value) eq 'ARRAY' ? @{$value} : ($value);
+    }
+
+    if (!@values && ref($request->{query}) eq 'HASH' && exists $request->{query}{$key}) {
+        my $value = $request->{query}{$key};
+        @values = ref($value) eq 'ARRAY' ? @{$value} : ($value);
+    }
+
+    return grep { defined && length } @values;
 }
 
 sub _clean_error {

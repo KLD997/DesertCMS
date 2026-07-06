@@ -50,9 +50,12 @@ sub install_default {
         _ensure_theme_style_template($dest);
         _ensure_site_brand_template($dest);
         _ensure_site_layout_template($dest);
+        _ensure_kinetic_marquee_template($dest);
         _ensure_mobile_nav_template($dest);
         _ensure_public_shell_script_template($dest);
         _ensure_site_layout_css($dest);
+        _ensure_v3_theme_effect_css($dest);
+        _ensure_kinetic_typography_css($dest);
         _ensure_logo_fit_css($dest);
         _ensure_mobile_nav_css($dest);
         _ensure_public_form_css($dest);
@@ -90,9 +93,12 @@ sub install_default {
     _ensure_theme_style_template($dest);
     _ensure_site_brand_template($dest);
     _ensure_site_layout_template($dest);
+    _ensure_kinetic_marquee_template($dest);
     _ensure_mobile_nav_template($dest);
     _ensure_public_shell_script_template($dest);
     _ensure_site_layout_css($dest);
+    _ensure_v3_theme_effect_css($dest);
+    _ensure_kinetic_typography_css($dest);
     _ensure_logo_fit_css($dest);
     _ensure_mobile_nav_css($dest);
     _ensure_public_form_css($dest);
@@ -1035,6 +1041,22 @@ sub _ensure_site_layout_template {
     close $fh;
 }
 
+sub _ensure_kinetic_marquee_template {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'templates', 'layout.html');
+    return unless -f $path;
+    my $body = _read_file($path);
+    return if $body =~ /\{\{kinetic_marquee\}\}/;
+
+    my $original = $body;
+    $body =~ s{(<main class="\{\{main_class\}\}">\s*)}{$1 . "    {{kinetic_marquee}}\n"}se;
+    return if $body eq $original;
+
+    open my $fh, '>', $path or die "cannot update theme kinetic marquee template $path: $!";
+    print {$fh} $body;
+    close $fh;
+}
+
 sub _ensure_mobile_nav_template {
     my ($dest) = @_;
     my $path = File::Spec->catfile($dest, 'templates', 'layout.html');
@@ -1209,6 +1231,54 @@ sub _ensure_site_layout_css {
 @media (max-width: 820px) { .site-main { width: min(100% - 28px, 760px); margin: 38px auto; } .site-footer, .site-footer-nav { align-items: flex-start; justify-content: flex-start; } }
 @media (max-width: 430px) { .site-main { width: min(100% - 24px, 760px); margin: 30px auto; } }
 CSS
+    close $fh;
+}
+
+sub _ensure_v3_theme_effect_css {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'assets', 'site.css');
+    return unless -f $path;
+    my $body = _read_file($path);
+    return if $body =~ /DesertCMS v3 theme effects/;
+
+    open my $fh, '>>', $path or die "cannot update theme v3 effect css $path: $!";
+    print {$fh} <<'CSS';
+
+/* DesertCMS v3 theme effects. */
+:root {
+  --site-background-overlay: none;
+  --site-background-blend-mode: normal;
+  --site-motion-duration: 0ms;
+  --site-hover-transform: none;
+  --site-lighting-shadow: var(--site-card-shadow);
+  --site-box-radius: var(--site-card-radius);
+  --site-gradient-bg: none;
+  --site-accent-gradient: var(--accent);
+  --site-box-alpha: 100%;
+  --site-outline-alpha: 100%;
+}
+body { background-image: var(--site-background-overlay, none), var(--site-background-image); background-blend-mode: var(--site-background-blend-mode, normal); }
+.link-card, .resource-card, .content-ref-card, .portfolio-card, .contributor-card, .docs-card, .docs-hub-stat, .docs-meta-strip, .event-action-panel, .event-meta div, .donation-card, .donation-status-card, .contributor-request-block { border-radius: var(--site-box-radius, var(--site-card-radius, 8px)); transition: transform var(--site-motion-duration, 0ms) ease, box-shadow var(--site-motion-duration, 0ms) ease, border-color var(--site-motion-duration, 0ms) ease; }
+.link-card:hover, .resource-card:hover, .content-ref-card:hover, .portfolio-card:hover, .contributor-card:hover, .docs-card:hover, .donation-card:hover { transform: var(--site-hover-transform, none); box-shadow: var(--site-lighting-shadow, var(--site-card-shadow, none)); }
+.hero, .page-hero, .module-heading, .donations-hero, .docs-hub-hero { background-image: var(--site-gradient-bg, none); }
+CSS
+    close $fh;
+}
+
+sub _ensure_kinetic_typography_css {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'assets', 'site.css');
+    return unless -f $path;
+    my $body = _read_file($path);
+    return if $body =~ /DesertCMS design system: public kinetic typography/;
+
+    my $source = File::Spec->catfile(_repo_default_theme_dir(), 'assets', 'site.css');
+    my $source_body = -f $source ? _read_file($source) : '';
+    my ($block) = $source_body =~ m{(/\* DesertCMS design system: public kinetic typography\. \*/[\s\S]*)\z};
+    return unless defined $block && length $block;
+
+    open my $fh, '>>', $path or die "cannot update theme kinetic typography css $path: $!";
+    print {$fh} "\n$block";
     close $fh;
 }
 

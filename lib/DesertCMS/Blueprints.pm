@@ -389,6 +389,8 @@ sub save {
     my $light = _theme_preset($args{theme_light_preset}, 'light');
     my $dark = _theme_preset($args{theme_dark_preset}, 'dark');
     my $shop = _bool($args{module_shop_enabled}) || _bool($args{shop_enabled}) ? 1 : 0;
+    my $social = _bool($args{module_social_enabled});
+    my $accounts = _bool($args{module_accounts_enabled}) || $social ? 1 : 0;
     my $pages_json = exists $args{default_pages_json}
         ? _clean_default_pages_json($args{default_pages_json})
         : encode_json(_parse_default_pages_text($args{default_pages_text}));
@@ -398,6 +400,7 @@ sub save {
         slug => $slug,
         description => $description,
         category => $category,
+        module_posts_enabled => exists $args{module_posts_enabled} ? _bool($args{module_posts_enabled}) : 1,
         module_map_enabled => _bool($args{module_map_enabled}),
         module_shop_enabled => $shop,
         module_gallery_enabled => _bool($args{module_gallery_enabled}),
@@ -410,6 +413,12 @@ sub save {
         module_newsletter_enabled => _bool($args{module_newsletter_enabled}),
         module_donations_enabled => _bool($args{module_donations_enabled}),
         module_testimonials_enabled => _bool($args{module_testimonials_enabled}),
+        module_accounts_enabled => $accounts,
+        module_live_streaming_enabled => _bool($args{module_live_streaming_enabled}),
+        module_forums_enabled => _bool($args{module_forums_enabled}),
+        module_social_enabled => $social,
+        module_notifications_enabled => exists $args{module_notifications_enabled} ? _bool($args{module_notifications_enabled}) : 1,
+        module_security_center_enabled => exists $args{module_security_center_enabled} ? _bool($args{module_security_center_enabled}) : 1,
         theme_default_mode => $theme_mode,
         theme_light_preset => $light,
         theme_dark_preset => $dark,
@@ -432,10 +441,12 @@ sub save {
                 q{
                     UPDATE contributor_blueprints
                     SET name = ?, slug = ?, description = ?, category = ?,
-                        module_map_enabled = ?, module_shop_enabled = ?, module_gallery_enabled = ?,
+                        module_posts_enabled = ?, module_map_enabled = ?, module_shop_enabled = ?, module_gallery_enabled = ?,
                         module_forms_enabled = ?, module_contributor_requests_enabled = ?, module_docs_enabled = ?,
                         module_directory_enabled = ?, module_bookings_enabled = ?, module_membership_enabled = ?,
                         module_newsletter_enabled = ?, module_donations_enabled = ?, module_testimonials_enabled = ?,
+                        module_accounts_enabled = ?, module_live_streaming_enabled = ?, module_forums_enabled = ?,
+                        module_social_enabled = ?, module_notifications_enabled = ?, module_security_center_enabled = ?,
                         theme_default_mode = ?, theme_light_preset = ?, theme_dark_preset = ?,
                         shop_enabled = ?, media_quota_mb = ?, post_quota = ?, page_quota = ?,
                         allow_master_gallery = ?, allow_master_posts = ?,
@@ -446,9 +457,10 @@ sub save {
                 undef,
                 @values{qw(
                     name slug description category
-                    module_map_enabled module_shop_enabled module_gallery_enabled
+                    module_posts_enabled module_map_enabled module_shop_enabled module_gallery_enabled
                     module_forms_enabled module_contributor_requests_enabled module_docs_enabled
                     module_directory_enabled module_bookings_enabled module_membership_enabled module_newsletter_enabled module_donations_enabled module_testimonials_enabled
+                    module_accounts_enabled module_live_streaming_enabled module_forums_enabled module_social_enabled module_notifications_enabled module_security_center_enabled
                     theme_default_mode theme_light_preset theme_dark_preset
                     shop_enabled media_quota_mb post_quota page_quota
                     allow_master_gallery allow_master_posts
@@ -462,23 +474,26 @@ sub save {
                 q{
                     INSERT INTO contributor_blueprints
                         (name, slug, description, category,
-                         module_map_enabled, module_shop_enabled, module_gallery_enabled,
+                         module_posts_enabled, module_map_enabled, module_shop_enabled, module_gallery_enabled,
                          module_forms_enabled, module_contributor_requests_enabled, module_docs_enabled,
                          module_directory_enabled, module_bookings_enabled, module_membership_enabled, module_newsletter_enabled, module_donations_enabled, module_testimonials_enabled,
+                         module_accounts_enabled, module_live_streaming_enabled, module_forums_enabled,
+                         module_social_enabled, module_notifications_enabled, module_security_center_enabled,
                          theme_default_mode, theme_light_preset, theme_dark_preset,
                          shop_enabled, media_quota_mb, post_quota, page_quota,
                          allow_master_gallery, allow_master_posts,
                          site_meta_title, site_meta_description, default_pages_json,
                          is_default, created_at, updated_at)
                     VALUES
-                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 },
                 undef,
                 @values{qw(
                     name slug description category
-                    module_map_enabled module_shop_enabled module_gallery_enabled
+                    module_posts_enabled module_map_enabled module_shop_enabled module_gallery_enabled
                     module_forms_enabled module_contributor_requests_enabled module_docs_enabled
                     module_directory_enabled module_bookings_enabled module_membership_enabled module_newsletter_enabled module_donations_enabled module_testimonials_enabled
+                    module_accounts_enabled module_live_streaming_enabled module_forums_enabled module_social_enabled module_notifications_enabled module_security_center_enabled
                     theme_default_mode theme_light_preset theme_dark_preset
                     shop_enabled media_quota_mb post_quota page_quota
                     allow_master_gallery allow_master_posts
@@ -534,6 +549,7 @@ sub snapshot {
         description => $blueprint->{description} || '',
         category => _category($blueprint->{category}),
         category_label => vertical_label($blueprint->{category}),
+        module_posts_enabled => _bool($blueprint->{module_posts_enabled}),
         module_map_enabled => _bool($blueprint->{module_map_enabled}),
         module_shop_enabled => _bool($blueprint->{module_shop_enabled}),
         module_gallery_enabled => _bool($blueprint->{module_gallery_enabled}),
@@ -546,6 +562,12 @@ sub snapshot {
         module_newsletter_enabled => _bool($blueprint->{module_newsletter_enabled}),
         module_donations_enabled => _bool($blueprint->{module_donations_enabled}),
         module_testimonials_enabled => _bool($blueprint->{module_testimonials_enabled}),
+        module_accounts_enabled => _bool($blueprint->{module_accounts_enabled}) || _bool($blueprint->{module_social_enabled}) ? 1 : 0,
+        module_live_streaming_enabled => _bool($blueprint->{module_live_streaming_enabled}),
+        module_forums_enabled => _bool($blueprint->{module_forums_enabled}),
+        module_social_enabled => _bool($blueprint->{module_social_enabled}),
+        module_notifications_enabled => _bool($blueprint->{module_notifications_enabled}),
+        module_security_center_enabled => _bool($blueprint->{module_security_center_enabled}),
         theme_default_mode => ($blueprint->{theme_default_mode} || '') eq 'dark' ? 'dark' : 'light',
         theme_light_preset => _theme_preset($blueprint->{theme_light_preset}, 'light'),
         theme_dark_preset => _theme_preset($blueprint->{theme_dark_preset}, 'dark'),
@@ -565,7 +587,10 @@ sub settings_from_snapshot {
     my ($snapshot) = @_;
     $snapshot ||= {};
     my $shop = _bool($snapshot->{module_shop_enabled}) || _bool($snapshot->{shop_enabled}) ? 1 : 0;
+    my $social = _bool($snapshot->{module_social_enabled});
+    my $accounts = _bool($snapshot->{module_accounts_enabled}) || $social ? 1 : 0;
     return {
+        module_posts_enabled => exists $snapshot->{module_posts_enabled} ? _bool($snapshot->{module_posts_enabled}) : 1,
         module_map_enabled => _bool($snapshot->{module_map_enabled}),
         module_shop_enabled => $shop,
         module_gallery_enabled => _bool($snapshot->{module_gallery_enabled}),
@@ -578,6 +603,12 @@ sub settings_from_snapshot {
         module_newsletter_enabled => _bool($snapshot->{module_newsletter_enabled}),
         module_donations_enabled => _bool($snapshot->{module_donations_enabled}),
         module_testimonials_enabled => _bool($snapshot->{module_testimonials_enabled}),
+        module_accounts_enabled => $accounts,
+        module_live_streaming_enabled => _bool($snapshot->{module_live_streaming_enabled}),
+        module_forums_enabled => _bool($snapshot->{module_forums_enabled}),
+        module_social_enabled => $social,
+        module_notifications_enabled => exists $snapshot->{module_notifications_enabled} ? _bool($snapshot->{module_notifications_enabled}) : 1,
+        module_security_center_enabled => exists $snapshot->{module_security_center_enabled} ? _bool($snapshot->{module_security_center_enabled}) : 1,
         shop_enabled => $shop,
         theme_default_mode => ($snapshot->{theme_default_mode} || '') eq 'dark' ? 'dark' : 'light',
         theme_light_preset => _theme_preset($snapshot->{theme_light_preset}, 'light'),

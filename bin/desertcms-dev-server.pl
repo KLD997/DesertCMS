@@ -72,7 +72,7 @@ sub _run_cgi {
 sub _dynamic_request {
     my ($request) = @_;
     my $path = $request->uri->path || '/';
-    return 1 if $path =~ m{\A/(?:admin|analytics|comments|ratings|forms|shop|stripe|billing|postmark|events|directory|bookings|members|newsletter|donate|testimonials)(?:/|\z)};
+    return 1 if $path =~ m{\A/(?:admin|analytics|comments|ratings|forms|shop|stripe|billing|postmark|events|directory|bookings|members|account|forums|social|live|newsletter|donate|testimonials)(?:/|\z)};
     return 1 if $path eq '/events.ics';
 
     my $config = eval { DesertCMS::Config->load };

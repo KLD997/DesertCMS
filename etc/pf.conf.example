@@ -14,5 +14,7 @@ pass out quick all keep state
 
 pass in quick on $ext_if proto tcp from <ssh_admins> to ($ext_if) port 22 flags S/SA keep state
 pass in quick on $ext_if proto tcp from any to ($ext_if) port { 80 443 } flags S/SA keep state
+# Optional Live Streaming OBS ingest. Enable only after the streaming worker and SubCMS gates are configured.
+# pass in quick on $ext_if proto tcp from any to ($ext_if) port 1935 flags S/SA keep state
 pass in quick on $ext_if inet proto icmp icmp-type echoreq keep state
 pass in quick on $ext_if inet6 proto icmp6 keep state

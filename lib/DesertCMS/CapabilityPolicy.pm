@@ -6,6 +6,7 @@ use warnings;
 my @CAPABILITY_DEFINITIONS = (
     [ manage_account              => 'Manage account',              'Update the signed-in admin account and first-login setup.' ],
     [ view_home                   => 'View home',                   'Open the main admin or contributor-site home view.' ],
+    [ customize_dashboard         => 'Customize dashboard',         'Choose dashboard widgets and local dashboard layout.' ],
     [ view_settings               => 'View settings',               'Open settings overview pages.' ],
     [ view_content                => 'View content',                'View pages, posts, templates, navigation, redirects, and comments.' ],
     [ edit_content                => 'Edit content',                'Create, update, publish, rebuild, or delete local pages and posts.' ],
@@ -19,6 +20,12 @@ my @CAPABILITY_DEFINITIONS = (
     [ customize_theme             => 'Customize theme',             'Change site identity, SEO, theme files, layout, fonts, and indexing settings.' ],
     [ view_features               => 'View features',               'View the local feature or module catalog.' ],
     [ enable_allowed_modules      => 'Enable allowed modules',      'Turn locally allowed modules on or off and save module settings.' ],
+    [ view_notifications          => 'View notifications',          'View admin and public notification inboxes.' ],
+    [ manage_notifications        => 'Manage notifications',        'Mark, archive, or configure notifications.' ],
+    [ view_security_center        => 'View Security Center',        'View read-only OpenBSD, network, package, module, and tenant security checks.' ],
+    [ queue_security_fixes        => 'Queue security fixes',        'Queue approved root-worker remediation jobs from Security Center findings.' ],
+    [ view_realtime               => 'View realtime service',       'View realtime SSE/WebSocket service status and adapters.' ],
+    [ manage_realtime             => 'Manage realtime service',     'Configure realtime event adapters and local service settings.' ],
     [ manage_billing              => 'Manage billing',              'Start checkout, open the billing portal, or change billing state.' ],
     [ view_usage                  => 'View usage',                  'View plan, quota, billing, and usage information.' ],
     [ manage_provider_settings    => 'Manage provider settings',    'Configure platform provider integrations such as Postmark and contributor domains.' ],
@@ -50,54 +57,58 @@ my %CAPABILITY_DEFINITION = map {
 my %ROLE_CAPABILITIES = (
     master => {
         owner => [qw(
-            manage_account view_home view_settings view_content edit_content
+            manage_account view_home customize_dashboard view_settings view_content edit_content
             view_media upload_media download_media_sources publish_media_resources delete_media_assets bulk_manage_media
             view_design customize_theme view_features enable_allowed_modules
+            view_notifications manage_notifications view_security_center queue_security_fixes view_realtime manage_realtime
             manage_billing view_usage manage_provider_settings view_master_control run_operations
             view_operations run_upgrades view_governance manage_governance view_federated
             review_federated_content review_contributors view_blueprints manage_blueprints view_service_plans
             manage_service_plans manage_contributor_lifecycle
         )],
         operator => [qw(
-            manage_account view_home view_settings view_content edit_content view_media upload_media
+            manage_account view_home customize_dashboard view_settings view_content edit_content view_media upload_media
             download_media_sources publish_media_resources delete_media_assets bulk_manage_media
             view_design customize_theme view_features enable_allowed_modules manage_billing view_usage
+            view_notifications manage_notifications view_security_center queue_security_fixes view_realtime manage_realtime
             manage_provider_settings view_master_control run_operations view_operations view_governance
             view_federated review_federated_content review_contributors view_blueprints manage_blueprints
             view_service_plans manage_service_plans manage_contributor_lifecycle
         )],
         reviewer => [qw(
             manage_account view_home view_settings view_master_control view_governance
+            view_notifications view_security_center view_realtime
             view_federated review_federated_content review_contributors view_blueprints
         )],
         curator => [qw(
-            manage_account view_home view_content edit_content view_media upload_media
+            manage_account view_home customize_dashboard view_content edit_content view_media upload_media
             download_media_sources publish_media_resources delete_media_assets bulk_manage_media
-            view_design customize_theme view_federated review_federated_content
+            view_design customize_theme view_notifications manage_notifications view_federated review_federated_content
         )],
         support => [qw(
             manage_account view_home view_settings view_content view_media view_usage
+            view_notifications view_security_center view_realtime
             view_master_control view_governance view_federated view_service_plans view_operations
         )],
     },
     contributor => {
         owner => [qw(
-            manage_account view_home view_settings view_content edit_content
+            manage_account view_home customize_dashboard view_settings view_content edit_content
             view_media upload_media download_media_sources publish_media_resources delete_media_assets bulk_manage_media
             view_design customize_theme view_features enable_allowed_modules
-            manage_billing view_usage
+            view_notifications manage_notifications manage_billing view_usage
         )],
         editor => [qw(
-            manage_account view_home view_settings view_content edit_content view_media upload_media
+            manage_account view_home customize_dashboard view_settings view_content edit_content view_media upload_media
             download_media_sources publish_media_resources bulk_manage_media
-            view_design customize_theme view_features enable_allowed_modules manage_billing view_usage
+            view_design customize_theme view_features enable_allowed_modules view_notifications manage_notifications manage_billing view_usage
         )],
         contributor => [qw(
             manage_account view_home view_content edit_content view_media upload_media
-            manage_billing view_usage
+            view_notifications manage_billing view_usage
         )],
         support => [qw(
-            manage_account view_home view_settings view_content view_media view_design view_usage
+            manage_account view_home view_settings view_content view_media view_design view_usage view_notifications
         )],
     },
 );
@@ -199,6 +210,10 @@ sub _route_capability {
 
     return 'view_home' if _matches($path, qr{\A/admin\z});
     return 'view_home' if _matches($path, qr{\A/admin/help\z});
+    return _read_or_write($method, 'view_home', 'customize_dashboard') if _matches(
+        $path,
+        qr{\A/admin/settings/dashboard(?:/|\z)}
+    );
     return 'manage_account' if _matches(
         $path,
         qr{\A/admin/account/setup\z},
@@ -233,7 +248,23 @@ sub _route_capability {
     return _read_or_write($method, 'view_features', 'enable_allowed_modules') if _matches(
         $path,
         qr{\A/admin/settings/modules(?:/|\z)},
+        qr{\A/admin/accounts(?:/|\z)},
+        qr{\A/admin/forums(?:/|\z)},
+        qr{\A/admin/social(?:/|\z)},
+        qr{\A/admin/live(?:/|\z)},
         qr{\A/admin/shop(?:/|\z)}
+    );
+    return _read_or_write($method, 'view_notifications', 'manage_notifications') if _matches(
+        $path,
+        qr{\A/admin/notifications(?:/|\z)}
+    );
+    return _read_or_write($method, 'view_security_center', 'queue_security_fixes') if _matches(
+        $path,
+        qr{\A/admin/settings/security(?:/|\z)}
+    );
+    return _read_or_write($method, 'view_realtime', 'manage_realtime') if _matches(
+        $path,
+        qr{\A/admin/settings/realtime(?:/|\z)}
     );
     return _read_or_write($method, 'view_usage', 'manage_billing') if _matches(
         $path,
@@ -314,6 +345,8 @@ sub _contributor_master_managed_route {
         qr{\A/admin/settings/plans(?:/|\z)},
         qr{\A/admin/settings/federation(?:/|\z)},
         qr{\A/admin/settings/governance(?:/|\z)},
+        qr{\A/admin/settings/security(?:/|\z)},
+        qr{\A/admin/settings/realtime(?:/|\z)},
         qr{\A/admin/settings/upgrade(?:/|\z)},
         qr{\A/admin/settings/operations(?:/|\z)},
         qr{\A/admin/settings/invites(?:/|\z)}

@@ -23,6 +23,10 @@ my @dynamic_routes = qw(
     directory
     bookings
     members
+    account
+    forums
+    social
+    live
     newsletter
     donate
     testimonials

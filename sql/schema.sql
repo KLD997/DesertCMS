@@ -888,6 +888,591 @@ CREATE TABLE IF NOT EXISTS post_ratings (
 CREATE INDEX IF NOT EXISTS idx_post_ratings_content
     ON post_ratings(content_id, updated_at);
 
+CREATE TABLE IF NOT EXISTS user_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL DEFAULT '',
+    username TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'disabled', 'moderated')),
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    moderation_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_login_at INTEGER,
+    UNIQUE(email COLLATE NOCASE)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_accounts_status
+    ON user_accounts(status, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_accounts_username
+    ON user_accounts(username COLLATE NOCASE)
+    WHERE username <> '';
+
+CREATE TABLE IF NOT EXISTS user_account_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    ip_address TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_sessions_account
+    ON user_account_sessions(account_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS user_account_password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    email TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'used', 'revoked', 'expired')) DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    ip_address TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_password_reset_tokens_account_status
+    ON user_account_password_reset_tokens(account_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS user_account_oauth_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE CASCADE,
+    state_hash TEXT NOT NULL UNIQUE,
+    code_verifier TEXT NOT NULL DEFAULT '',
+    nonce_hash TEXT NOT NULL DEFAULT '',
+    redirect_path TEXT NOT NULL DEFAULT '/account',
+    ip_address TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_oauth_states_provider_expiry
+    ON user_account_oauth_states(provider, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_oauth_states_account
+    ON user_account_oauth_states(account_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS user_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_subject TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(provider, provider_subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_identities_account
+    ON user_identities(account_id);
+
+CREATE TABLE IF NOT EXISTS user_account_login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    subject_hash TEXT NOT NULL,
+    ip_hash TEXT NOT NULL DEFAULT '',
+    success INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_login_attempts_subject_time
+    ON user_account_login_attempts(scope, subject_hash, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_login_attempts_ip_time
+    ON user_account_login_attempts(scope, ip_hash, created_at);
+
+CREATE TABLE IF NOT EXISTS user_account_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    actor_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    actor_user_id INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT '',
+    ip_address TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_audit_events_account_time
+    ON user_account_audit_events(account_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_user_account_audit_events_type_time
+    ON user_account_audit_events(event_type, created_at);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_group_members (
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'moderator', 'owner')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(group_id, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS shop_carts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    session_token_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'ordered', 'abandoned')),
+    currency TEXT NOT NULL DEFAULT 'usd',
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_shop_carts_account_status
+    ON shop_carts(account_id, status, updated_at);
+
+CREATE TABLE IF NOT EXISTS shop_cart_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cart_id INTEGER NOT NULL REFERENCES shop_carts(id) ON DELETE CASCADE,
+    listing_id INTEGER REFERENCES shop_listings(id) ON DELETE SET NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    unit_amount_cents INTEGER NOT NULL DEFAULT 0,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_shop_cart_items_cart
+    ON shop_cart_items(cart_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    audience TEXT NOT NULL DEFAULT 'admin' CHECK (audience IN ('admin', 'public', 'user')),
+    scope_key TEXT NOT NULL DEFAULT '',
+    topic TEXT NOT NULL,
+    module_key TEXT NOT NULL DEFAULT '',
+    severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    actor_user_id INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+    actor_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    recipient_user_id INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+    recipient_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    entity_type TEXT NOT NULL DEFAULT '',
+    entity_id TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'read', 'archived')),
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    read_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_audience_status
+    ON notifications(audience, status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_topic_time
+    ON notifications(topic, created_at);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    audience TEXT NOT NULL DEFAULT 'admin' CHECK (audience IN ('admin', 'public', 'user')),
+    recipient_user_id INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
+    recipient_account_id INTEGER REFERENCES user_accounts(id) ON DELETE CASCADE,
+    topic TEXT NOT NULL,
+    delivery_channel TEXT NOT NULL DEFAULT 'in_app' CHECK (delivery_channel IN ('in_app', 'email', 'realtime')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(audience, recipient_user_id, recipient_account_id, topic, delivery_channel)
+);
+
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_id INTEGER NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+    delivery_channel TEXT NOT NULL DEFAULT 'in_app' CHECK (delivery_channel IN ('in_app', 'email', 'realtime')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'delivered', 'failed', 'skipped')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    adapter_response_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    next_retry_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_notification
+    ON notification_deliveries(notification_id, delivery_channel);
+
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status_retry
+    ON notification_deliveries(status, next_retry_at, updated_at);
+
+CREATE TABLE IF NOT EXISTS admin_dashboard_widgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT '',
+    widget_key TEXT NOT NULL,
+    module_key TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 100,
+    size TEXT NOT NULL DEFAULT 'medium' CHECK (size IN ('small', 'medium', 'large', 'wide')),
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_dashboard_widgets_user
+    ON admin_dashboard_widgets(user_id, role, position);
+
+CREATE TABLE IF NOT EXISTS theme_image_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL DEFAULT 'unsplash',
+    provider_id TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    author_name TEXT NOT NULL DEFAULT '',
+    author_url TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
+    download_location TEXT NOT NULL DEFAULT '',
+    local_path TEXT NOT NULL DEFAULT '',
+    usage_context TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_theme_image_sources_context
+    ON theme_image_sources(usage_context, provider, provider_id);
+
+CREATE TABLE IF NOT EXISTS security_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_key TEXT NOT NULL,
+    module_key TEXT NOT NULL DEFAULT '',
+    severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'warning', 'critical')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'acknowledged', 'resolved', 'ignored')),
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    detected_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_findings_status
+    ON security_findings(status, severity, detected_at);
+
+CREATE TABLE IF NOT EXISTS security_remediation_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_key TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed', 'canceled')),
+    approved_by_user_id INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+    worker_event_id INTEGER,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    error_text TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_remediation_queue_status
+    ON security_remediation_queue(status, created_at);
+
+CREATE TABLE IF NOT EXISTS realtime_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel TEXT NOT NULL,
+    audience TEXT NOT NULL DEFAULT 'admin',
+    client_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'connected' CHECK (status IN ('connected', 'closed', 'failed')),
+    connected_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    closed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_realtime_sessions_channel_status
+    ON realtime_sessions(channel, status, last_seen_at);
+
+CREATE TABLE IF NOT EXISTS live_stream_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    stream_key_hash TEXT NOT NULL DEFAULT '',
+    stream_key_rotated_at INTEGER,
+    stream_key_revoked_at INTEGER,
+    ingest_policy_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('offline', 'scheduled', 'live', 'disabled')),
+    hls_path TEXT NOT NULL DEFAULT '',
+    chat_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS live_stream_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES live_stream_channels(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'ended', 'failed')),
+    scheduled_at INTEGER,
+    started_at INTEGER,
+    ended_at INTEGER,
+    viewer_peak INTEGER NOT NULL DEFAULT 0,
+    worker_id TEXT NOT NULL DEFAULT '',
+    last_heartbeat_at INTEGER,
+    heartbeat_status TEXT NOT NULL DEFAULT '',
+    hls_output_path TEXT NOT NULL DEFAULT '',
+    ingest_detail_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_stream_sessions_channel_status
+    ON live_stream_sessions(channel_id, status, started_at);
+
+CREATE TABLE IF NOT EXISTS live_stream_worker_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER REFERENCES live_stream_channels(id) ON DELETE SET NULL,
+    session_id INTEGER REFERENCES live_stream_sessions(id) ON DELETE CASCADE,
+    worker_id TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT 'heartbeat',
+    status TEXT NOT NULL DEFAULT '',
+    viewer_count INTEGER NOT NULL DEFAULT 0,
+    hls_output_path TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    log_line TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_stream_worker_events_session_time
+    ON live_stream_worker_events(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_live_stream_worker_events_worker_time
+    ON live_stream_worker_events(worker_id, created_at);
+
+CREATE TABLE IF NOT EXISTS live_chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES live_stream_sessions(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'visible' CHECK (status IN ('visible', 'hidden', 'deleted', 'reported')),
+    ip_address TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_chat_messages_session_time
+    ON live_chat_messages(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_live_chat_messages_ip_time
+    ON live_chat_messages(session_id, ip_address, created_at);
+
+CREATE TABLE IF NOT EXISTS live_chat_presence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES live_stream_sessions(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    presence_key TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present', 'idle', 'left')),
+    joined_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(session_id, presence_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_chat_presence_session_status
+    ON live_chat_presence(session_id, status, last_seen_at);
+
+CREATE TABLE IF NOT EXISTS live_chat_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER REFERENCES live_chat_messages(id) ON DELETE CASCADE,
+    session_id INTEGER REFERENCES live_stream_sessions(id) ON DELETE CASCADE,
+    reporter_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'dismissed', 'actioned')),
+    moderator_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_chat_reports_status_time
+    ON live_chat_reports(status, created_at);
+
+CREATE TABLE IF NOT EXISTS live_chat_blocked_terms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    term TEXT NOT NULL UNIQUE,
+    action TEXT NOT NULL DEFAULT 'report' CHECK (action IN ('report', 'hide', 'reject')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS forum_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 100,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'locked', 'hidden')),
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'accounts', 'moderators')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS forum_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL REFERENCES forum_categories(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'locked', 'hidden', 'deleted')),
+    pinned INTEGER NOT NULL DEFAULT 0,
+    ip_address TEXT NOT NULL DEFAULT '',
+    moderator_note TEXT NOT NULL DEFAULT '',
+    last_reply_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(category_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_forum_topics_category_time
+    ON forum_topics(category_id, status, last_reply_at);
+
+CREATE TABLE IF NOT EXISTS forum_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER NOT NULL REFERENCES forum_topics(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    parent_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'visible' CHECK (status IN ('visible', 'hidden', 'deleted', 'reported')),
+    ip_address TEXT NOT NULL DEFAULT '',
+    moderator_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_forum_posts_topic_time
+    ON forum_posts(topic_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_forum_posts_ip_time
+    ON forum_posts(ip_address, created_at);
+
+CREATE TABLE IF NOT EXISTS forum_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER REFERENCES forum_topics(id) ON DELETE CASCADE,
+    post_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE,
+    reporter_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'dismissed', 'actioned')),
+    moderator_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_forum_reports_status_time
+    ON forum_reports(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_forum_reports_topic_post
+    ON forum_reports(topic_id, post_id);
+
+CREATE TABLE IF NOT EXISTS social_profiles (
+    account_id INTEGER PRIMARY KEY REFERENCES user_accounts(id) ON DELETE CASCADE,
+    handle TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    avatar_path TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'followers', 'private')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'moderated', 'disabled')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS social_follows (
+    follower_account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    followed_account_id INTEGER NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'muted', 'blocked')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(follower_account_id, followed_account_id)
+);
+
+CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'followers', 'private')),
+    status TEXT NOT NULL DEFAULT 'visible' CHECK (status IN ('visible', 'hidden', 'deleted', 'reported')),
+    ip_address TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_posts_account_time
+    ON social_posts(account_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_social_posts_ip_time
+    ON social_posts(ip_address, created_at);
+
+CREATE TABLE IF NOT EXISTS social_reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE CASCADE,
+    reaction TEXT NOT NULL DEFAULT 'like',
+    created_at INTEGER NOT NULL,
+    UNIQUE(post_id, account_id, reaction)
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_reactions_post
+    ON social_reactions(post_id);
+
+CREATE TABLE IF NOT EXISTS social_replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'visible' CHECK (status IN ('visible', 'hidden', 'deleted', 'reported')),
+    ip_address TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_replies_post_time
+    ON social_replies(post_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_social_replies_ip_time
+    ON social_replies(ip_address, created_at);
+
+CREATE TABLE IF NOT EXISTS social_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER REFERENCES social_posts(id) ON DELETE CASCADE,
+    reply_id INTEGER REFERENCES social_replies(id) ON DELETE CASCADE,
+    profile_account_id INTEGER REFERENCES social_profiles(account_id) ON DELETE CASCADE,
+    reporter_account_id INTEGER REFERENCES user_accounts(id) ON DELETE SET NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'dismissed', 'actioned')),
+    moderator_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_reports_status_time
+    ON social_reports(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_social_reports_post_profile
+    ON social_reports(post_id, profile_account_id);
+
+CREATE INDEX IF NOT EXISTS idx_social_reports_reply
+    ON social_reports(reply_id);
+
 CREATE TABLE IF NOT EXISTS form_submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     form_key TEXT NOT NULL DEFAULT 'contact',
@@ -969,6 +1554,7 @@ CREATE TABLE IF NOT EXISTS contributor_blueprints (
     slug TEXT NOT NULL UNIQUE,
     description TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT 'photographer',
+    module_posts_enabled INTEGER NOT NULL DEFAULT 1,
     module_map_enabled INTEGER NOT NULL DEFAULT 1,
     module_shop_enabled INTEGER NOT NULL DEFAULT 0,
     module_gallery_enabled INTEGER NOT NULL DEFAULT 1,
@@ -981,6 +1567,12 @@ CREATE TABLE IF NOT EXISTS contributor_blueprints (
     module_newsletter_enabled INTEGER NOT NULL DEFAULT 0,
     module_donations_enabled INTEGER NOT NULL DEFAULT 0,
     module_testimonials_enabled INTEGER NOT NULL DEFAULT 0,
+    module_accounts_enabled INTEGER NOT NULL DEFAULT 0,
+    module_live_streaming_enabled INTEGER NOT NULL DEFAULT 0,
+    module_forums_enabled INTEGER NOT NULL DEFAULT 0,
+    module_social_enabled INTEGER NOT NULL DEFAULT 0,
+    module_notifications_enabled INTEGER NOT NULL DEFAULT 1,
+    module_security_center_enabled INTEGER NOT NULL DEFAULT 1,
     theme_default_mode TEXT NOT NULL DEFAULT 'light' CHECK (theme_default_mode IN ('light', 'dark')),
     theme_light_preset TEXT NOT NULL DEFAULT 'light-archive',
     theme_dark_preset TEXT NOT NULL DEFAULT 'dark-archive',

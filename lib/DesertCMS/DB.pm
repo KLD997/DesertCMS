@@ -7,7 +7,7 @@ use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Spec;
 
-use constant CURRENT_SCHEMA_VERSION => 2026070501;
+use constant CURRENT_SCHEMA_VERSION => 2026070618;
 
 sub new {
     my ($class, %args) = @_;
@@ -78,6 +78,7 @@ sub migrate {
             access_group_id    => "INTEGER",
         });
         $self->_ensure_columns('content_revisions', {
+            author_user_id    => "INTEGER",
             parent_id         => "INTEGER",
             collections_text  => "TEXT NOT NULL DEFAULT ''",
             meta_title         => "TEXT NOT NULL DEFAULT ''",
@@ -132,7 +133,58 @@ sub migrate {
             email => "TEXT NOT NULL DEFAULT ''",
             role  => "TEXT NOT NULL DEFAULT 'owner'",
         });
+        $self->_ensure_columns('user_account_oauth_states', {
+            account_id => "INTEGER",
+        });
+        $self->_ensure_columns('user_account_audit_events', {
+            actor_user_id => "INTEGER",
+        });
+        $self->_ensure_columns('forum_categories', {
+            visibility => "TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'accounts', 'moderators'))",
+        });
+        $self->_ensure_columns('forum_topics', {
+            pinned         => "INTEGER NOT NULL DEFAULT 0",
+            ip_address     => "TEXT NOT NULL DEFAULT ''",
+            moderator_note => "TEXT NOT NULL DEFAULT ''",
+        });
+        $self->_ensure_columns('forum_posts', {
+            ip_address     => "TEXT NOT NULL DEFAULT ''",
+            moderator_note => "TEXT NOT NULL DEFAULT ''",
+        });
+        $dbh->do('CREATE INDEX IF NOT EXISTS idx_forum_posts_ip_time ON forum_posts(ip_address, created_at)');
+        $self->_ensure_columns('live_stream_channels', {
+            stream_key_rotated_at => "INTEGER",
+            stream_key_revoked_at => "INTEGER",
+            ingest_policy_json    => "TEXT NOT NULL DEFAULT '{}'",
+        });
+        $self->_ensure_columns('live_stream_sessions', {
+            worker_id          => "TEXT NOT NULL DEFAULT ''",
+            last_heartbeat_at  => "INTEGER",
+            heartbeat_status   => "TEXT NOT NULL DEFAULT ''",
+            hls_output_path    => "TEXT NOT NULL DEFAULT ''",
+        });
+        $self->_ensure_columns('live_chat_messages', {
+            ip_address => "TEXT NOT NULL DEFAULT ''",
+        });
+        $dbh->do('CREATE INDEX IF NOT EXISTS idx_live_chat_messages_ip_time ON live_chat_messages(session_id, ip_address, created_at)');
+        $self->_ensure_columns('notifications', {
+            actor_account_id => "INTEGER",
+        });
+        $self->_ensure_columns('social_reports', {
+            reply_id => "INTEGER",
+        });
+        $self->_ensure_columns('social_posts', {
+            ip_address => "TEXT NOT NULL DEFAULT ''",
+        });
+        $self->_ensure_columns('social_replies', {
+            ip_address => "TEXT NOT NULL DEFAULT ''",
+        });
+        $dbh->do('CREATE INDEX IF NOT EXISTS idx_social_posts_ip_time ON social_posts(ip_address, created_at)');
+        $dbh->do('CREATE INDEX IF NOT EXISTS idx_social_replies_ip_time ON social_replies(ip_address, created_at)');
         $self->_ensure_columns('contributor_sites', {
+            owner_first_name      => "TEXT NOT NULL DEFAULT ''",
+            owner_last_initial    => "TEXT NOT NULL DEFAULT ''",
+            owner_email           => "TEXT NOT NULL DEFAULT ''",
             blueprint_id            => "INTEGER",
             blueprint_snapshot_json => "TEXT NOT NULL DEFAULT '{}'",
             media_quota_mb          => "INTEGER NOT NULL DEFAULT 0",
@@ -155,12 +207,19 @@ sub migrate {
         });
         $self->_ensure_columns('contributor_blueprints', {
             category => "TEXT NOT NULL DEFAULT 'photographer'",
+            module_posts_enabled => "INTEGER NOT NULL DEFAULT 1",
             module_directory_enabled => "INTEGER NOT NULL DEFAULT 0",
             module_bookings_enabled => "INTEGER NOT NULL DEFAULT 0",
             module_membership_enabled => "INTEGER NOT NULL DEFAULT 0",
             module_newsletter_enabled => "INTEGER NOT NULL DEFAULT 0",
             module_donations_enabled => "INTEGER NOT NULL DEFAULT 0",
             module_testimonials_enabled => "INTEGER NOT NULL DEFAULT 0",
+            module_accounts_enabled => "INTEGER NOT NULL DEFAULT 0",
+            module_live_streaming_enabled => "INTEGER NOT NULL DEFAULT 0",
+            module_forums_enabled => "INTEGER NOT NULL DEFAULT 0",
+            module_social_enabled => "INTEGER NOT NULL DEFAULT 0",
+            module_notifications_enabled => "INTEGER NOT NULL DEFAULT 1",
+            module_security_center_enabled => "INTEGER NOT NULL DEFAULT 1",
         });
         $self->_ensure_columns('service_plans', {
             features_json => "TEXT NOT NULL DEFAULT '{}'",

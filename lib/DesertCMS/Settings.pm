@@ -109,6 +109,7 @@ sub all {
         map_default_lat       => '34.500000',
         map_default_lng       => '-112.000000',
         map_default_zoom      => '5',
+        module_posts_enabled  => _config_truthy($config, 'module_posts_enabled', 1),
         module_map_enabled    => _config_truthy($config, 'module_map_enabled', 1),
         module_shop_enabled   => $module_shop_enabled,
         module_gallery_enabled => _config_truthy($config, 'module_gallery_enabled', 0),
@@ -122,6 +123,39 @@ sub all {
         module_newsletter_enabled => _config_truthy($config, 'module_newsletter_enabled', 0),
         module_donations_enabled => _config_truthy($config, 'module_donations_enabled', 0),
         module_testimonials_enabled => _config_truthy($config, 'module_testimonials_enabled', 0),
+        module_accounts_enabled => _config_truthy($config, 'module_accounts_enabled', 0),
+        module_live_streaming_enabled => _config_truthy($config, 'module_live_streaming_enabled', 0),
+        module_forums_enabled => _config_truthy($config, 'module_forums_enabled', 0),
+        module_social_enabled => _config_truthy($config, 'module_social_enabled', 0),
+        module_notifications_enabled => _config_truthy($config, 'module_notifications_enabled', 1),
+        module_security_center_enabled => _config_truthy($config, 'module_security_center_enabled', 1),
+        social_delete_window_seconds => $config->get('social_delete_window_seconds') || 900,
+        accounts_google_client_id => $config->get('accounts_google_client_id') || '',
+        accounts_google_client_secret => $config->get('accounts_google_client_secret') || '',
+        accounts_google_enabled => _config_truthy($config, 'accounts_google_enabled', 1),
+        accounts_oidc_discovery_url => $config->get('accounts_oidc_discovery_url') || '',
+        accounts_oidc_client_id => $config->get('accounts_oidc_client_id') || '',
+        accounts_oidc_client_secret => $config->get('accounts_oidc_client_secret') || '',
+        accounts_oidc_enabled => _config_truthy($config, 'accounts_oidc_enabled', 1),
+        accounts_allowed_domains => $config->get('accounts_allowed_domains') || '',
+        realtime_enabled      => _config_truthy($config, 'realtime_enabled', 0),
+        realtime_bind_host    => $config->get('realtime_bind_host') || '127.0.0.1',
+        realtime_port         => $config->get('realtime_port') || 8787,
+        realtime_public_url   => $config->get('realtime_public_url') || '',
+        realtime_allowed_origins => $config->get('realtime_allowed_origins') || '',
+        live_chat_account_only => _config_truthy($config, 'live_chat_account_only', 0),
+        live_chat_slow_mode_seconds => $config->get('live_chat_slow_mode_seconds') || 0,
+        live_chat_delete_window_seconds => $config->get('live_chat_delete_window_seconds') || 900,
+        live_chat_presence_stale_seconds => $config->get('live_chat_presence_stale_seconds') || 120,
+        theme_unsplash_enabled => _config_truthy($config, 'theme_unsplash_enabled', 0),
+        unsplash_access_key   => $config->get('unsplash_access_key') || '',
+        theme_background_effect => $config->get('theme_background_effect') || 'none',
+        theme_motion_effect   => $config->get('theme_motion_effect') || 'none',
+        theme_lighting_effect => $config->get('theme_lighting_effect') || 'none',
+        theme_box_transparency => $config->get('theme_box_transparency') || '0',
+        theme_outline_transparency => $config->get('theme_outline_transparency') || '0',
+        theme_box_shape       => $config->get('theme_box_shape') || 'soft',
+        theme_gradient_style  => $config->get('theme_gradient_style') || 'none',
         gallery_title         => 'Showcase',
         gallery_intro         => 'A curated showcase of published assets, collections, products, archives, artwork, venues, and samples.',
         forms_title           => 'Contact',
@@ -214,6 +248,7 @@ sub all {
         }
     }
     $settings{module_shop_enabled} = $settings{shop_enabled} if !$seen{module_shop_enabled} && $seen{shop_enabled};
+    $settings{module_accounts_enabled} = 1 if _truthy($settings{module_social_enabled});
     $settings{commerce_model} = DesertCMS::Commerce::model($config, \%settings);
 
     $db->{_settings_cache} = { %settings };
@@ -227,6 +262,9 @@ sub set_many {
     delete $db->{_settings_cache} if $db;
     delete $db->{_settings_cache_generation} if $db;
     delete $db->{_settings_cache_config_key} if $db;
+    if ($values && _social_requires_accounts($db, $values)) {
+        $values->{module_accounts_enabled} = 1;
+    }
     my $ts = now();
     my %allowed = map { $_ => 1 } qw(
         site_name site_description site_meta_title site_meta_description
@@ -248,7 +286,14 @@ sub set_many {
         site_header_layout site_brand_display site_logo_size site_nav_style
         site_homepage_layout site_content_width site_spacing_scale
         site_footer_layout site_footer_order site_footer_nav_enabled site_footer_description_enabled site_footer_credit
-        module_map_enabled module_shop_enabled module_gallery_enabled module_forms_enabled module_contributor_requests_enabled module_docs_enabled module_events_enabled module_directory_enabled module_bookings_enabled module_membership_enabled module_newsletter_enabled module_donations_enabled module_testimonials_enabled
+        module_posts_enabled module_map_enabled module_shop_enabled module_gallery_enabled module_forms_enabled module_contributor_requests_enabled module_docs_enabled module_events_enabled module_directory_enabled module_bookings_enabled module_membership_enabled module_newsletter_enabled module_donations_enabled module_testimonials_enabled
+        module_accounts_enabled module_live_streaming_enabled module_forums_enabled module_social_enabled module_notifications_enabled module_security_center_enabled
+        social_delete_window_seconds
+        accounts_google_client_id accounts_google_client_secret accounts_google_enabled
+        accounts_oidc_discovery_url accounts_oidc_client_id accounts_oidc_client_secret accounts_oidc_enabled accounts_allowed_domains
+        realtime_enabled realtime_bind_host realtime_port realtime_public_url realtime_allowed_origins
+        live_chat_account_only live_chat_slow_mode_seconds live_chat_delete_window_seconds live_chat_presence_stale_seconds
+        theme_unsplash_enabled unsplash_access_key theme_background_effect theme_motion_effect theme_lighting_effect theme_box_transparency theme_outline_transparency theme_box_shape theme_gradient_style
         gallery_title gallery_intro forms_title forms_intro forms_button_label forms_success_message
         forms_enabled_types forms_uploads_enabled forms_max_upload_mb forms_notify_postmark_enabled forms_notification_email
         docs_title docs_intro docs_source_dir
@@ -318,6 +363,19 @@ sub _default_postmark_sender_mode {
     return 'inherit' if length($config->get('contributor_site_id') || '');
     return 'inherit' if length($config->get('contributor_domain') || '');
     return 'site';
+}
+
+sub _social_requires_accounts {
+    my ($db, $values) = @_;
+    return 0 unless $values && ref($values) eq 'HASH';
+    return _truthy($values->{module_social_enabled}) if exists $values->{module_social_enabled};
+    return 0 unless $db && $db->can('dbh');
+    my ($social_enabled) = $db->dbh->selectrow_array(
+        'SELECT value FROM settings WHERE key = ?',
+        undef,
+        'module_social_enabled'
+    );
+    return _truthy($social_enabled);
 }
 
 sub _truthy {

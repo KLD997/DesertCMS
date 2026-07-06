@@ -319,6 +319,9 @@ like($theme_settings_html, qr/data-theme-panel-nav.*Preview &amp; Colors.*Struct
 like($theme_settings_html, qr/data-theme-panel="preview".*Live Theme Preview.*data-theme-preview.*theme-preview-device--desktop.*theme-preview-device--mobile/s, 'theme preview panel contains live desktop and mobile previews');
 like($theme_settings_html, qr/data-theme-preview-mode-button="light".*data-theme-preview-mode-button="dark"/s, 'theme preview panel contains light and dark preview controls');
 like($theme_settings_html, qr/theme-appearance-panel.*Color Theme.*data-theme-vars=/s, 'theme preview panel contains color theme controls');
+like($theme_settings_html, qr/value="light-kinetic"[^>]*data-theme-preset-mode="light"/, 'theme settings expose the public light kinetic preset');
+like($theme_settings_html, qr/value="dark-kinetic"[^>]*data-theme-preset-mode="dark"/, 'theme settings expose the public dark kinetic preset');
+like($theme_settings_html, qr/<option value="bundled:space-grotesk"[^>]*>Space Grotesk \(bundled\)<\/option>/, 'theme settings expose bundled Space Grotesk as a public font option');
 like($theme_settings_html, qr/data-theme-panel="structure".*Structure &amp; Layout.*Header layout.*Logo fit.*Logo max width px.*Logo focal X.*Homepage layout preset/s, 'theme structure panel contains layout controls');
 like($theme_settings_html, qr/data-theme-panel="typography".*Typography &amp; Components.*OpenBSD Font Packages.*Refresh OpenBSD catalog/s, 'theme typography panel contains font and component controls');
 like($theme_settings_html, qr/data-theme-panel="footer".*Footer section order/s, 'theme footer panel contains footer controls');
@@ -398,6 +401,63 @@ is($theme_saved_settings->{theme_button_style}, 'outline', 'theme save stores bu
 is($theme_saved_settings->{theme_button_radius}, 'pill', 'theme save stores button radius token');
 is($theme_saved_settings->{theme_card_style}, 'raised', 'theme save stores card style token');
 is($theme_saved_settings->{theme_card_radius}, 'round', 'theme save stores card radius token');
+
+_capture_response(sub {
+    $app->_site_settings_save(
+        Local::SettingsRequest->new({
+            setting_section          => 'theme',
+            theme_heading_font       => 'pkg:noto-fonts',
+            theme_body_font          => 'sans',
+            theme_ui_font            => 'serif',
+            theme_light_preset       => 'light-kinetic',
+            theme_dark_preset        => 'dark-kinetic',
+            theme_default_mode       => 'dark',
+        }),
+        { username => 'admin' },
+        'settings-session',
+    );
+});
+my $kinetic_preserve_settings = DesertCMS::Settings::all($config, $db);
+is($kinetic_preserve_settings->{theme_heading_font}, 'pkg:noto-fonts', 'kinetic preset save preserves explicit heading font');
+is($kinetic_preserve_settings->{theme_body_font}, 'sans', 'kinetic preset save preserves explicit body font');
+is($kinetic_preserve_settings->{theme_ui_font}, 'serif', 'kinetic preset save preserves explicit interface font');
+
+DesertCMS::Settings::set_many($config, $db, {
+    theme_heading_font => 'serif',
+    theme_body_font    => 'serif',
+    theme_ui_font      => 'sans',
+});
+_capture_response(sub {
+    $app->_site_settings_save(
+        Local::SettingsRequest->new({
+            setting_section          => 'theme',
+            theme_heading_font       => 'serif',
+            theme_body_font          => 'serif',
+            theme_ui_font            => 'sans',
+            theme_light_preset       => 'light-kinetic',
+            theme_dark_preset        => 'dark-kinetic',
+            theme_default_mode       => 'dark',
+        }),
+        { username => 'admin' },
+        'settings-session',
+    );
+});
+my $kinetic_default_settings = DesertCMS::Settings::all($config, $db);
+is($kinetic_default_settings->{theme_heading_font}, 'bundled:space-grotesk', 'kinetic preset save adopts bundled heading font from defaults');
+is($kinetic_default_settings->{theme_body_font}, 'bundled:space-grotesk', 'kinetic preset save adopts bundled body font from defaults');
+is($kinetic_default_settings->{theme_ui_font}, 'bundled:space-grotesk', 'kinetic preset save adopts bundled interface font from defaults');
+my $kinetic_public_html = _read(File::Spec->catfile($root, 'public', 'index.html'));
+like($kinetic_public_html, qr/<body class="[^"]*site-theme-light--kinetic[^"]*site-theme-dark--kinetic[^"]*site-design--kinetic/, 'public page includes kinetic body classes after kinetic preset save');
+like($kinetic_public_html, qr/<div class="kinetic-marquee" aria-hidden="true"><span>DESERTCMS \/ PUBLIC WEB \/ OPENBSD \/ SECURE CMS \/ <\/span>/, 'public page renders the decorative kinetic marquee');
+like($kinetic_public_html, qr/font-family: "Space Grotesk";/, 'public kinetic page emits local Space Grotesk font-face CSS');
+ok(
+    -f File::Spec->catfile($root, 'public', 'assets', 'fonts', 'space-grotesk', 'SpaceGrotesk-VariableFont_wght.woff2'),
+    'public rebuild publishes bundled Space Grotesk font asset'
+);
+ok(
+    -f File::Spec->catfile($root, 'public', 'assets', 'fonts', 'space-grotesk', 'OFL.txt'),
+    'public rebuild publishes bundled Space Grotesk license asset'
+);
 
 my $app_source = _read(File::Spec->catfile($repo, 'lib', 'DesertCMS', 'App.pm'));
 like($app_source, qr/initThemeBuilderPreview/, 'admin JavaScript wires the Theme Builder live preview');

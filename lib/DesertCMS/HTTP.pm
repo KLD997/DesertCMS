@@ -294,6 +294,7 @@ sub html_page {
     my $admin_css_version = escape_html($args{admin_css_version} || '20260705d');
     my $topbar_class = $product_mode eq 'contributor' ? 'topbar contributor-topbar' : 'topbar';
     my $topbar_actions_class = $product_mode eq 'contributor' ? 'topbar-actions contributor-topbar-actions' : 'topbar-actions';
+    my $nav_state_class = length($user_nav) ? ' has-admin-nav' : '';
     my $admin_menu_toggle = length($user_nav)
         ? q{<button type="button" class="admin-menu-toggle" data-admin-menu-toggle aria-controls="admin-primary-nav" aria-expanded="false" aria-label="Open admin navigation" title="Open admin navigation"><svg class="admin-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>}
         : '';
@@ -309,7 +310,7 @@ sub html_page {
   <script src="/admin/assets/map.js?v=20260703l" defer></script>
   <script src="/admin/assets/editor.js?v=20260705c" defer></script>
 </head>
-<body class="admin-product-mode--$product_mode">
+<body class="admin-product-mode--$product_mode$nav_state_class">
   <header class="$topbar_class">
     <a class="brand" href="/admin">$brand</a>
     $admin_menu_toggle

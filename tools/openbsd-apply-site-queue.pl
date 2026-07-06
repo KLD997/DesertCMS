@@ -498,6 +498,10 @@ sub httpd_dynamic_routes {
         directory
         bookings
         members
+        account
+        forums
+        social
+        live
         newsletter
         donate
         testimonials

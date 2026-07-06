@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use DesertCMS::DateTimeLite;
 use Encode qw(encode_utf8);
+use File::Copy qw(copy);
+use File::Find;
 use File::Path qw(make_path remove_tree);
 use File::Spec;
 use JSON::PP qw(encode_json decode_json);
@@ -1049,6 +1051,8 @@ sub _layout_template_vars {
     my $site_images = DesertCMS::Settings::site_image_manifest($config);
     my $navigation = _navigation_html($config, $db);
     my $year = strftime('%Y', localtime);
+    my $light_kinetic = DesertCMS::SiteTheme::is_kinetic($site, 'light');
+    my $dark_kinetic = DesertCMS::SiteTheme::is_kinetic($site, 'dark');
 
     my @body = (
         'site-layout',
@@ -1060,6 +1064,9 @@ sub _layout_template_vars {
         "site-nav-style--$nav_style",
         "site-footer-layout--$footer",
     );
+    push @body, 'site-theme-light--kinetic' if $light_kinetic;
+    push @body, 'site-theme-dark--kinetic' if $dark_kinetic;
+    push @body, 'site-design--kinetic' if DesertCMS::SiteTheme::is_kinetic($site);
     my @header_class = ('site-header', "site-header--$header", "site-logo-size--$logo_size");
     my @brand_class = ('site-name', "site-brand--$brand");
     my @actions_class = ('site-actions', "site-actions--$header");
@@ -1084,11 +1091,20 @@ sub _layout_template_vars {
         footer_navigation  => _footer_navigation_html($site, $navigation),
         footer_credit      => _footer_credit_html($site, $year),
         favicon_link       => _favicon_link($site, $site_images),
+        kinetic_marquee    => _kinetic_marquee_html($light_kinetic || $dark_kinetic),
         theme_style        => DesertCMS::SiteTheme::style_tag($site, config => $config),
         default_theme_mode => DesertCMS::SiteTheme::default_mode($site),
         analytics_enabled  => DesertCMS::Analytics::enabled($config) ? 1 : 0,
         analytics_script   => DesertCMS::Analytics::tracking_script($config),
     );
+}
+
+sub _kinetic_marquee_html {
+    my ($enabled) = @_;
+    return '' unless $enabled;
+    my $text = 'DESERTCMS / PUBLIC WEB / OPENBSD / SECURE CMS / ';
+    my $safe = escape_html($text);
+    return qq{<div class="kinetic-marquee" aria-hidden="true"><span>$safe</span><span>$safe</span></div>};
 }
 
 sub _site_brand_html {
@@ -3922,14 +3938,25 @@ sub _publish_assets {
     DesertCMS::Theme::install_default($config);
     my $site = $db ? DesertCMS::Settings::all($config, $db) : {};
     DesertCMS::FontPackages::publish_selected_fonts($config, $site);
+    my $source_root = File::Spec->catdir($config->get('theme_dir'), 'default', 'assets');
+    my $dest_root = File::Spec->catdir($config->get('public_root'), 'assets');
     for my $asset (qw(site.css site.js map.js comments.js)) {
-        my $source = File::Spec->catfile($config->get('theme_dir'), 'default', 'assets', $asset);
-        my $dest = File::Spec->catfile($config->get('public_root'), 'assets', $asset);
-        open my $in, '<', $source or die "cannot read theme asset $source: $!";
-        local $/;
-        my $body = <$in>;
-        close $in;
-        _write_file($dest, $body);
+        _copy_public_asset(
+            File::Spec->catfile($source_root, $asset),
+            File::Spec->catfile($dest_root, $asset)
+        );
+    }
+    my $font_source_root = File::Spec->catdir($source_root, 'fonts');
+    if (-d $font_source_root) {
+        find(
+            sub {
+                return if -d $File::Find::name;
+                my $rel = File::Spec->abs2rel($File::Find::name, $source_root);
+                my $dest = File::Spec->catfile($dest_root, File::Spec->splitdir($rel));
+                _copy_public_asset($File::Find::name, $dest);
+            },
+            $font_source_root
+        );
     }
 }
 
@@ -3957,6 +3984,14 @@ sub _write_file {
     open my $fh, '>', $path or die "cannot write $path: $!";
     print {$fh} $body;
     close $fh;
+}
+
+sub _copy_public_asset {
+    my ($source, $dest) = @_;
+    die "cannot read theme asset $source: $!" unless -f $source;
+    my (undef, $dir) = File::Spec->splitpath($dest);
+    make_path($dir) unless -d $dir;
+    copy($source, $dest) or die "cannot publish theme asset $source: $!";
 }
 
 sub _remove_static_file {

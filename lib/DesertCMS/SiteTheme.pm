@@ -28,6 +28,23 @@ my @PRESETS = (
         },
     },
     {
+        id   => 'light-kinetic',
+        name => 'Kinetic Light',
+        mode => 'light',
+        design_system => 'kinetic',
+        recommended_fonts => {
+            theme_heading_font => 'bundled:space-grotesk',
+            theme_body_font    => 'bundled:space-grotesk',
+            theme_ui_font      => 'bundled:space-grotesk',
+        },
+        vars => {
+            ink => '#09090B', muted => '#52525B', paper => '#FAFAFA',
+            panel => '#FFFFFF', field => '#F4F4F5', line => '#18181B',
+            accent => '#DFE104', accent_dark => '#B8BA00', support => '#09090B',
+            button_ink => '#09090B',
+        },
+    },
+    {
         id   => 'light-sage',
         name => 'Sage Field',
         mode => 'light',
@@ -83,6 +100,23 @@ my @PRESETS = (
         },
     },
     {
+        id   => 'dark-kinetic',
+        name => 'Kinetic Dark',
+        mode => 'dark',
+        design_system => 'kinetic',
+        recommended_fonts => {
+            theme_heading_font => 'bundled:space-grotesk',
+            theme_body_font    => 'bundled:space-grotesk',
+            theme_ui_font      => 'bundled:space-grotesk',
+        },
+        vars => {
+            ink => '#FAFAFA', muted => '#A1A1AA', paper => '#09090B',
+            panel => '#18181B', field => '#111113', line => '#3F3F46',
+            accent => '#DFE104', accent_dark => '#B8BA00', support => '#FAFAFA',
+            button_ink => '#09090B',
+        },
+    },
+    {
         id   => 'dark-canyon',
         name => 'Canyon Night',
         mode => 'dark',
@@ -134,6 +168,22 @@ sub preset_by_id {
     return $BY_ID{$id || ''} || $PRESETS[0];
 }
 
+sub is_kinetic {
+    my ($site, $mode) = @_;
+    $site ||= {};
+    if (defined $mode && length $mode) {
+        return _preset_is_kinetic(selected_preset_id($site, $mode));
+    }
+    my $default = default_mode($site);
+    return _preset_is_kinetic(selected_preset_id($site, $default));
+}
+
+sub recommended_fonts_for_preset {
+    my ($id) = @_;
+    my $preset = $BY_ID{$id || ''} || return {};
+    return { %{ $preset->{recommended_fonts} || {} } };
+}
+
 sub selected_preset_id {
     my ($site, $mode) = @_;
     $mode = $mode && $mode eq 'dark' ? 'dark' : 'light';
@@ -171,7 +221,10 @@ sub css_vars {
     my $dark = _theme_for_mode($site, 'dark');
     my $background = _background_value($site);
     my $layout = _layout_vars($site);
-    my $font_faces = $args{config} ? DesertCMS::FontPackages::font_face_css($args{config}, $site) : '';
+    my @kinetic_fonts = (is_kinetic($site, 'light') || is_kinetic($site, 'dark')) ? ('bundled:space-grotesk') : ();
+    my $font_faces = $args{config}
+        ? DesertCMS::FontPackages::font_face_css($args{config}, $site, include_bundled => \@kinetic_fonts)
+        : '';
 
     return $font_faces
         . ':root,' . "\n" . ':root[data-theme="light"] {' . "\n"
@@ -231,6 +284,12 @@ sub _preset_matches_mode {
     return $BY_ID{$id}->{mode} eq $mode ? 1 : 0;
 }
 
+sub _preset_is_kinetic {
+    my ($id) = @_;
+    return 0 unless defined $id && exists $BY_ID{$id};
+    return ($BY_ID{$id}->{design_system} || '') eq 'kinetic' ? 1 : 0;
+}
+
 sub _vars_css {
     my ($vars) = @_;
     my $css = '';
@@ -265,6 +324,13 @@ sub _layout_vars {
     my $button_radius = _choice($site->{theme_button_radius}, 'soft', qw(square soft pill));
     my $card_style = _choice($site->{theme_card_style}, 'outlined', qw(flat outlined raised));
     my $card_radius = _choice($site->{theme_card_radius}, 'soft', qw(square soft round));
+    my $background_effect = _choice($site->{theme_background_effect}, 'none', qw(none wash grain vignette));
+    my $motion_effect = _choice($site->{theme_motion_effect}, 'none', qw(none subtle lift));
+    my $lighting_effect = _choice($site->{theme_lighting_effect}, 'none', qw(none soft glow));
+    my $box_shape = _choice($site->{theme_box_shape}, 'soft', qw(square soft round pill));
+    my $gradient_style = _choice($site->{theme_gradient_style}, 'none', qw(none accent split sheen));
+    my $box_transparency = _percent_int($site->{theme_box_transparency}, 0, 0, 80);
+    my $outline_transparency = _percent_int($site->{theme_outline_transparency}, 0, 0, 80);
 
     my %widths = (
         narrow   => '660px',
@@ -342,10 +408,72 @@ sub _layout_vars {
         soft   => '8px',
         round  => '16px',
     );
+    my %box_radii = (
+        square => '0px',
+        soft   => '8px',
+        round  => '18px',
+        pill   => '28px',
+    );
+    my %background_effects = (
+        none => {
+            overlay => 'none',
+            blend   => 'normal',
+        },
+        wash => {
+            overlay => 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%, color-mix(in srgb, var(--support) 8%, transparent))',
+            blend   => 'normal',
+        },
+        grain => {
+            overlay => 'repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink) 4%, transparent) 0 1px, transparent 1px 7px)',
+            blend   => 'normal',
+        },
+        vignette => {
+            overlay => 'radial-gradient(ellipse at center, transparent 42%, color-mix(in srgb, var(--ink) 16%, transparent) 100%)',
+            blend   => 'normal',
+        },
+    );
+    my %motion_effects = (
+        none   => { duration => '0ms',   transform => 'none' },
+        subtle => { duration => '160ms', transform => 'translateY(-1px)' },
+        lift   => { duration => '240ms', transform => 'translateY(-3px)' },
+    );
+    my %lighting_effects = (
+        none => {
+            shadow => $card_styles{$card_style}{shadow},
+        },
+        soft => {
+            shadow => '0 18px 42px rgba(16, 32, 51, 0.14)',
+        },
+        glow => {
+            shadow => '0 18px 48px color-mix(in srgb, var(--accent) 22%, transparent)',
+        },
+    );
+    my %gradient_styles = (
+        none => {
+            bg     => 'none',
+            accent => 'var(--accent)',
+        },
+        accent => {
+            bg     => 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--support) 12%, transparent))',
+            accent => 'linear-gradient(135deg, var(--accent), var(--support))',
+        },
+        split => {
+            bg     => 'linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 50%, color-mix(in srgb, var(--support) 12%, transparent))',
+            accent => 'linear-gradient(90deg, var(--accent), var(--support))',
+        },
+        sheen => {
+            bg     => 'linear-gradient(120deg, transparent, color-mix(in srgb, var(--panel) 36%, transparent), transparent)',
+            accent => 'linear-gradient(120deg, var(--accent-dark), var(--accent), var(--support))',
+        },
+    );
     my $logo_width = _optional_px($site->{site_logo_max_width_px}, $logos{$logo}{width}, 80, 640);
     my $logo_height = _optional_px($site->{site_logo_max_height_px}, $logos{$logo}{height}, 24, 180);
     my $logo_position = _percent($site->{site_logo_focal_x}, 50) . '% '
         . _percent($site->{site_logo_focal_y}, 50) . '%';
+    my $card_bg = _transparent_mix($card_styles{$card_style}{bg}, 100 - $box_transparency);
+    my $card_border = $card_styles{$card_style}{border};
+    $card_border = _transparent_mix($card_border, 100 - $outline_transparency)
+        unless $card_border eq 'transparent';
 
     return {
         content_width => $widths{$width},
@@ -374,10 +502,20 @@ sub _layout_vars {
         button_color  => $button_styles{$button_style}{color},
         button_shadow => $button_styles{$button_style}{shadow},
         button_radius => $button_radii{$button_radius},
-        card_bg       => $card_styles{$card_style}{bg},
-        card_border   => $card_styles{$card_style}{border},
+        card_bg       => $card_bg,
+        card_border   => $card_border,
         card_shadow   => $card_styles{$card_style}{shadow},
         card_radius   => $card_radii{$card_radius},
+        background_overlay => $background_effects{$background_effect}{overlay},
+        background_blend   => $background_effects{$background_effect}{blend},
+        motion_duration    => $motion_effects{$motion_effect}{duration},
+        hover_transform    => $motion_effects{$motion_effect}{transform},
+        lighting_shadow    => $lighting_effects{$lighting_effect}{shadow},
+        box_radius         => $box_radii{$box_shape},
+        gradient_bg        => $gradient_styles{$gradient_style}{bg},
+        accent_gradient    => $gradient_styles{$gradient_style}{accent},
+        box_alpha          => (100 - $box_transparency) . '%',
+        outline_alpha      => (100 - $outline_transparency) . '%',
     };
 }
 
@@ -413,7 +551,17 @@ sub _layout_css {
         . "  --site-card-bg: $vars->{card_bg};\n"
         . "  --site-card-border: $vars->{card_border};\n"
         . "  --site-card-shadow: $vars->{card_shadow};\n"
-        . "  --site-card-radius: $vars->{card_radius};\n";
+        . "  --site-card-radius: $vars->{card_radius};\n"
+        . "  --site-background-overlay: $vars->{background_overlay};\n"
+        . "  --site-background-blend-mode: $vars->{background_blend};\n"
+        . "  --site-motion-duration: $vars->{motion_duration};\n"
+        . "  --site-hover-transform: $vars->{hover_transform};\n"
+        . "  --site-lighting-shadow: $vars->{lighting_shadow};\n"
+        . "  --site-box-radius: $vars->{box_radius};\n"
+        . "  --site-gradient-bg: $vars->{gradient_bg};\n"
+        . "  --site-accent-gradient: $vars->{accent_gradient};\n"
+        . "  --site-box-alpha: $vars->{box_alpha};\n"
+        . "  --site-outline-alpha: $vars->{outline_alpha};\n";
 }
 
 sub _choice {
@@ -438,6 +586,24 @@ sub _percent {
     my $int = int($value);
     return $fallback if $int < 0 || $int > 100;
     return $int;
+}
+
+sub _percent_int {
+    my ($value, $fallback, $min, $max) = @_;
+    return $fallback unless defined $value && "$value" =~ /\A[0-9]+\z/;
+    my $int = int($value);
+    return $fallback if $int < $min || $int > $max;
+    return $int;
+}
+
+sub _transparent_mix {
+    my ($base, $alpha) = @_;
+    $base ||= 'var(--panel)';
+    $alpha = 100 unless defined $alpha && "$alpha" =~ /\A[0-9]+\z/;
+    $alpha = 100 if $alpha > 100;
+    $alpha = 0 if $alpha < 0;
+    return $base if $alpha >= 100 || $base eq 'transparent';
+    return "color-mix(in srgb, $base $alpha%, transparent)";
 }
 
 sub _valid_color {

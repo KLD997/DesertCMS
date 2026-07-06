@@ -12,6 +12,15 @@ our @EXPORT_OK = qw(
 
 my @MODULE_DEFINITIONS = (
     {
+        key                  => 'posts',
+        label                => 'Posts',
+        description          => 'Adds optional dated writing for news, articles, field notes, announcements, comments, ratings, archives, and feeds while preserving existing imported post data.',
+        public_path          => '/posts/',
+        settings_path        => '/admin/settings/modules/posts',
+        setting_key          => 'module_posts_enabled',
+        default_plan_enabled => 1,
+    },
+    {
         key                  => 'map',
         label                => 'Map / Locations',
         description          => 'Adds the public /map/ locations page for stores, venues, project locations, historical sites, event locations, service areas, and other mapped content.',
@@ -170,6 +179,61 @@ my @MODULE_DEFINITIONS = (
         default_plan_enabled => 0,
     },
     {
+        key                  => 'accounts',
+        label                => 'Accounts',
+        description          => 'Adds unified public identity, local login, Google/OIDC identities, groups, profile moderation, and optional account-backed carts and order history.',
+        public_path          => '/account/',
+        settings_path        => '/admin/settings/modules/accounts',
+        setting_key          => 'module_accounts_enabled',
+        default_plan_enabled => 0,
+    },
+    {
+        key                  => 'live_streaming',
+        label                => 'Live Streaming',
+        description          => 'Adds OBS-compatible ingest planning, HLS playback, stream keys, live chat, moderation, schedules, and SubCMS streaming gates.',
+        public_path          => '/live/',
+        settings_path        => '/admin/settings/modules/live-streaming',
+        setting_key          => 'module_live_streaming_enabled',
+        default_plan_enabled => 0,
+    },
+    {
+        key                  => 'forums',
+        label                => 'Forums',
+        description          => 'Adds categories, topics, replies, moderation queues, permissions, reporting, and notifications for public communities.',
+        public_path          => '/forums/',
+        settings_path        => '/admin/settings/modules/forums',
+        setting_key          => 'module_forums_enabled',
+        default_plan_enabled => 0,
+    },
+    {
+        key                  => 'social',
+        label                => 'Social',
+        description          => 'Adds unified-account profiles, follows, feeds, reactions, mentions, reporting, moderation, and notifications. Enabling Social also enables Accounts.',
+        public_path          => '/social/',
+        settings_path        => '/admin/settings/modules/social',
+        setting_key          => 'module_social_enabled',
+        default_plan_enabled => 0,
+    },
+    {
+        key                  => 'notifications',
+        label                => 'Notifications',
+        description          => 'Adds the central v3 event bus for admin and public notifications across enabled modules, public accounts, dashboards, and realtime adapters.',
+        public_path          => '/notifications/',
+        settings_path        => '/admin/notifications',
+        setting_key          => 'module_notifications_enabled',
+        default_plan_enabled => 1,
+    },
+    {
+        key                           => 'security_center',
+        label                         => 'Security Center',
+        description                   => 'Adds read-only OpenBSD, pf, httpd, acme-client, package, DNS/TLS, tenant, backup, worker, and module security checks with approval-queued fixes.',
+        public_path                   => '',
+        settings_path                 => '/admin/settings/security',
+        setting_key                   => 'module_security_center_enabled',
+        default_plan_enabled          => 1,
+        managed_by_master_contributor => 1,
+    },
+    {
         key                  => 'resource_publishing',
         label                => 'Resource Downloads',
         description          => 'Allows private source files to be published as public Resource-block downloads.',
@@ -276,6 +340,9 @@ sub features_json {
 sub _configured_enabled {
     my ($settings, $key) = @_;
     $settings ||= {};
+    if (($key || '') eq 'posts') {
+        return _truthy(_setting($settings, 'module_posts_enabled', 1));
+    }
     if (($key || '') eq 'map') {
         return _truthy(_setting($settings, 'module_map_enabled', 1));
     }
@@ -354,6 +421,25 @@ sub _configured_enabled {
     }
     if (($key || '') eq 'resource_publishing') {
         return _truthy(_setting($settings, 'module_resource_publishing_enabled', 1));
+    }
+    if (($key || '') eq 'accounts') {
+        return 1 if _truthy(_setting($settings, 'module_social_enabled', 0));
+        return _truthy(_setting($settings, 'module_accounts_enabled', 0));
+    }
+    if (($key || '') eq 'live_streaming') {
+        return _truthy(_setting($settings, 'module_live_streaming_enabled', 0));
+    }
+    if (($key || '') eq 'forums') {
+        return _truthy(_setting($settings, 'module_forums_enabled', 0));
+    }
+    if (($key || '') eq 'social') {
+        return _truthy(_setting($settings, 'module_social_enabled', 0));
+    }
+    if (($key || '') eq 'notifications') {
+        return _truthy(_setting($settings, 'module_notifications_enabled', 1));
+    }
+    if (($key || '') eq 'security_center') {
+        return _truthy(_setting($settings, 'module_security_center_enabled', 1));
     }
     return 0;
 }

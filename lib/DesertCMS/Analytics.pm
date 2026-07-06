@@ -233,6 +233,9 @@ sub summary {
         $limit
     );
 
+    my $daily_days = int($args{daily_days} || ($days > 30 ? 30 : $days));
+    $daily_days = 7 if $daily_days < 1;
+    $daily_days = 90 if $daily_days > 90;
     my $daily = $dbh->selectall_arrayref(
         q{
             SELECT strftime('%Y-%m-%d', occurred_at, 'unixepoch') AS day,
@@ -244,7 +247,7 @@ sub summary {
             ORDER BY day ASC
         },
         { Slice => {} },
-        now() - (7 * 86400)
+        now() - ($daily_days * 86400)
     );
 
     my $recent = $dbh->selectall_arrayref(
@@ -277,6 +280,7 @@ sub summary {
         locations       => $locations,
         city_locations  => $city_locations,
         daily           => $daily,
+        daily_days      => $daily_days,
         recent          => $recent,
         enabled         => enabled($config),
     };

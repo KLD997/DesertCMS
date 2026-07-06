@@ -18,6 +18,8 @@ use DesertCMS::SiteTheme;
 my $root = tempdir(CLEANUP => 1);
 $root =~ s{\\}{/}g;
 make_path("$root/data", "$root/public");
+my $repo = File::Spec->catdir($FindBin::Bin, '..');
+$repo =~ s{\\}{/}g;
 
 my $config_path = "$root/desertcms.conf";
 open my $fh, '>', $config_path or die "cannot write $config_path: $!";
@@ -25,12 +27,14 @@ print {$fh} <<"CONF";
 site_name = Font Test
 data_dir = $root/data
 public_root = $root/public
+theme_dir = $repo/themes
 CONF
 close $fh;
 
 my $config = DesertCMS::Config->load($config_path);
 
 is(DesertCMS::FontPackages::clean_font_id('serif', 'sans'), 'serif', 'accepts built-in font id');
+is(DesertCMS::FontPackages::clean_font_id('bundled:space-grotesk', 'sans'), 'bundled:space-grotesk', 'accepts bundled font id');
 is(DesertCMS::FontPackages::clean_font_id('pkg:noto-fonts', 'sans'), 'pkg:noto-fonts', 'accepts safe package font id');
 is(DesertCMS::FontPackages::clean_font_id('pkg:../../bad', 'sans'), 'sans', 'rejects unsafe package font id');
 is(DesertCMS::FontPackages::clean_repo('https://ftp.example/pub/OpenBSD/7.4/packages/amd64/'), 'https://ftp.example/pub/OpenBSD/7.4/packages/amd64/', 'accepts HTTPS package repo');
@@ -73,8 +77,15 @@ _write(
 my $options = DesertCMS::FontPackages::font_options($config);
 my %ids = map { $_->{id} => $_->{label} } @{$options};
 ok($ids{serif}, 'built-in serif option remains available');
+is($ids{'bundled:space-grotesk'}, 'Space Grotesk (bundled)', 'bundled Space Grotesk appears as a selectable font');
 ok($ids{'pkg:noto-fonts'}, 'installed OpenBSD package font appears as an option');
 ok(!$ids{'pkg:available-font'}, 'uninstalled package font is not selectable yet');
+
+like(
+    DesertCMS::FontPackages::css_stack_for_font_id('bundled:space-grotesk', 'sans'),
+    qr/"Space Grotesk", system-ui/,
+    'bundled font stack uses Space Grotesk and local fallbacks'
+);
 
 my $site = {
     theme_heading_font => 'pkg:noto-fonts',
@@ -97,6 +108,23 @@ my $published_fonts = eval {
 };
 ok($published_fonts, 'missing package font files do not abort font publishing');
 ok(-d File::Spec->catdir($root, 'public', 'assets', 'fonts'), 'font publishing still prepares public font directory');
+
+my $bundled_site = {
+    theme_heading_font => 'bundled:space-grotesk',
+    theme_body_font    => 'bundled:space-grotesk',
+    theme_ui_font      => 'bundled:space-grotesk',
+};
+my $bundled_css = DesertCMS::SiteTheme::css_vars($bundled_site, config => $config);
+like($bundled_css, qr/\@font-face/, 'bundled font selection emits font-face CSS');
+like($bundled_css, qr/font-family: "Space Grotesk";/, 'bundled font-face uses the Space Grotesk family');
+like($bundled_css, qr/url\("\/assets\/fonts\/space-grotesk\/SpaceGrotesk-VariableFont_wght\.woff2"\) format\("woff2"\)/, 'bundled font-face points at local public WOFF2 asset path');
+like($bundled_css, qr/font-weight: 300 700;/, 'bundled variable font exposes its weight range');
+like($bundled_css, qr/--site-heading-font: "Space Grotesk", system-ui, -apple-system/, 'theme variables use bundled font stack');
+DesertCMS::FontPackages::publish_selected_fonts($config, $bundled_site);
+ok(
+    -f File::Spec->catfile($root, 'public', 'assets', 'fonts', 'space-grotesk', 'SpaceGrotesk-VariableFont_wght.woff2'),
+    'font publishing copies the bundled Space Grotesk file when selected'
+);
 
 my $job = DesertCMS::FontPackages::queue_install(
     $config,

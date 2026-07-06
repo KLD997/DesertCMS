@@ -34,6 +34,20 @@ my @BUILTIN_FONTS = (
 );
 my %BUILTIN = map { $_->{id} => $_ } @BUILTIN_FONTS;
 
+my @BUNDLED_FONTS = (
+    {
+        id       => 'bundled:space-grotesk',
+        label    => 'Space Grotesk (bundled)',
+        slug     => 'space-grotesk',
+        family   => 'Space Grotesk',
+        file     => 'SpaceGrotesk-VariableFont_wght.woff2',
+        css      => '"Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        weight   => '300 700',
+        style    => 'normal',
+    },
+);
+my %BUNDLED = map { $_->{id} => $_ } @BUNDLED_FONTS;
+
 sub font_dir {
     my ($config) = @_;
     return File::Spec->catdir($config->get('data_dir'), 'font-packages');
@@ -53,6 +67,10 @@ sub builtin_fonts {
     return [ map { { %{$_} } } @BUILTIN_FONTS ];
 }
 
+sub bundled_fonts {
+    return [ map { { %{$_} } } @BUNDLED_FONTS ];
+}
+
 sub font_options {
     my ($config) = @_;
     my @options = map {
@@ -63,6 +81,15 @@ sub font_options {
             installed => 1,
         }
     } @BUILTIN_FONTS;
+
+    push @options, map {
+        {
+            id        => $_->{id},
+            label     => $_->{label},
+            source    => 'bundled',
+            installed => 1,
+        }
+    } @BUNDLED_FONTS;
 
     my $catalog = read_catalog($config);
     my @packages = grep { $_->{installed} && @{$_->{font_files} || []} } @{$catalog->{packages} || []};
@@ -82,6 +109,7 @@ sub css_stack_for_font_id {
     my ($font_id, $fallback_id) = @_;
     $font_id = clean_font_id($font_id, $fallback_id || 'sans');
     return $BUILTIN{$font_id}{css} if $BUILTIN{$font_id};
+    return $BUNDLED{$font_id}{css} if $BUNDLED{$font_id};
 
     if ($font_id =~ /\Apkg:([A-Za-z0-9._+-]+)\z/) {
         my $stem = $1;
@@ -98,6 +126,7 @@ sub clean_font_id {
     $fallback ||= 'sans';
     $fallback = 'sans' unless $BUILTIN{$fallback};
     return $font_id if defined $font_id && $BUILTIN{$font_id};
+    return $font_id if defined $font_id && $BUNDLED{$font_id};
     return $font_id if defined $font_id && $font_id =~ /\Apkg:[A-Za-z0-9._+-]+\z/;
     return $fallback;
 }
@@ -115,12 +144,46 @@ sub selected_package_stems {
     return @stems;
 }
 
+sub selected_bundled_font_ids {
+    my ($site, %args) = @_;
+    my %seen;
+    my @ids;
+    for my $id (@{$args{include} || []}) {
+        next unless defined $id && $BUNDLED{$id};
+        next if $seen{$id}++;
+        push @ids, $id;
+    }
+    for my $key (qw(theme_heading_font theme_body_font theme_ui_font)) {
+        my $id = clean_font_id(($site || {})->{$key}, 'sans');
+        next unless $BUNDLED{$id};
+        next if $seen{$id}++;
+        push @ids, $id;
+    }
+    return @ids;
+}
+
 sub font_face_css {
-    my ($config, $site) = @_;
+    my ($config, $site, %args) = @_;
     return '' unless $config;
+    my $css = '';
+    for my $id (selected_bundled_font_ids($site || {}, include => $args{include_bundled} || [])) {
+        my $font = $BUNDLED{$id} || next;
+        my $family = _css_string($font->{family});
+        my $url = _public_bundled_font_url($font);
+        my $format = _font_format($font->{file});
+        my $weight = $font->{weight} || 400;
+        my $style = $font->{style} || 'normal';
+        $css .= "\@font-face {\n"
+            . "  font-family: \"$family\";\n"
+            . "  src: url(\"$url\") format(\"$format\");\n"
+            . "  font-weight: $weight;\n"
+            . "  font-style: $style;\n"
+            . "  font-display: swap;\n"
+            . "}\n";
+    }
+
     my $catalog = read_catalog($config);
     my %by_stem = map { ($_->{stem} || '') => $_ } @{$catalog->{packages} || []};
-    my $css = '';
     for my $stem (selected_package_stems($site || {})) {
         my $pkg = $by_stem{$stem} || _installed_package_row($stem);
         next unless $pkg && @{$pkg->{font_files} || []};
@@ -152,6 +215,16 @@ sub publish_selected_fonts {
 
     remove_tree($dest_root) if -d $dest_root;
     make_path($dest_root);
+
+    for my $id (selected_bundled_font_ids($site || {})) {
+        my $font = $BUNDLED{$id} || next;
+        my $source = _bundled_font_source($config, $font);
+        next unless -f $source;
+        my $dest_dir = File::Spec->catdir($dest_root, $font->{slug});
+        make_path($dest_dir) unless -d $dest_dir;
+        my $dest = File::Spec->catfile($dest_dir, $font->{file});
+        copy($source, $dest) or warn "skipping bundled font $source: $!\n";
+    }
 
     for my $stem (keys %selected) {
         my $pkg = $by_stem{$stem} || _installed_package_row($stem);
@@ -487,6 +560,23 @@ sub _public_font_url {
     my ($stem, $source) = @_;
     return '' unless _safe_installed_font_file($source);
     return '/assets/fonts/' . _safe_slug($stem) . '/' . _public_font_filename($source);
+}
+
+sub _public_bundled_font_url {
+    my ($font) = @_;
+    return '/assets/fonts/' . _safe_slug($font->{slug}) . '/' . _public_font_filename($font->{file});
+}
+
+sub _bundled_font_source {
+    my ($config, $font) = @_;
+    return File::Spec->catfile(
+        $config->get('theme_dir'),
+        'default',
+        'assets',
+        'fonts',
+        _safe_slug($font->{slug}),
+        _public_font_filename($font->{file})
+    );
 }
 
 sub _public_font_filename {

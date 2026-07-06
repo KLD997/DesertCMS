@@ -21,6 +21,10 @@ server "example.com" {
 		max-age 31536000
 	}
 
+	location "/streams/*" {
+		root "/htdocs/desertcms-site"
+	}
+
 	location "/admin*" {
 		fastcgi {
 			socket "/run/desertcms.sock"
@@ -134,6 +138,42 @@ server "example.com" {
 			socket "/run/desertcms.sock"
 			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
 			param SCRIPT_NAME "/members"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/account*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/account"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/forums*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/forums"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/social*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/social"
+			param DESERTCMS_CONFIG "/etc/desertcms.conf"
+		}
+	}
+
+	location "/live*" {
+		fastcgi {
+			socket "/run/desertcms.sock"
+			param SCRIPT_FILENAME "/usr/local/www/desertcms/bin/desertcms.cgi"
+			param SCRIPT_NAME "/live"
 			param DESERTCMS_CONFIG "/etc/desertcms.conf"
 		}
 	}

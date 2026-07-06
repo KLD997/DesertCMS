@@ -19,6 +19,7 @@ my @expected = qw(
     PRIVACY_AND_DATA.md
     SITE_OWNER_GUIDE.md
     TECHNICAL_ARCHITECTURE.md
+    V3_RUNTIME_ROADMAP.md
 );
 
 my @removed = qw(
@@ -40,6 +41,9 @@ my @removed = qw(
 
 my %expected = map { $_ => 1 } @expected;
 my %removed = map { $_ => 1 } @removed;
+my %internal_planning = (
+    'V3_RUNTIME_ROADMAP.md' => 1,
+);
 
 opendir my $dh, $docs_dir or die "cannot read $docs_dir: $!";
 my @files = sort grep { /\.md\z/ } readdir $dh;
@@ -59,6 +63,11 @@ my $reference = 0;
 my $all_docs = '';
 for my $file (@expected) {
     my $body = _read(File::Spec->catfile($docs_dir, $file));
+    if ($internal_planning{$file}) {
+        like($body, qr/\A---\n(?:.*\n)*?title:\s+.+\n(?:.*\n)*?summary:\s+.+\n(?:.*\n)*?audience:\s+Technical\n(?:.*\n)*?resource_type:\s+Planning\n(?:.*\n)*?tags:\s+.+\n(?:.*\n)*?updated:\s+20\d\d-\d\d-\d\d\n(?:.*\n)*?access:\s+Internal\n(?:.*\n)*?order:\s+\d+\n---\n/s, "$file has complete internal planning front matter");
+        $all_docs .= "\n$file\n$body\n";
+        next;
+    }
     like($body, qr/\A---\n(?:.*\n)*?title:\s+.+\n(?:.*\n)*?summary:\s+.+\n(?:.*\n)*?audience:\s+(?:Site Management|Technical)\n(?:.*\n)*?resource_type:\s+(?:Guide|Reference)\n(?:.*\n)*?tags:\s+.+\n(?:.*\n)*?updated:\s+20\d\d-\d\d-\d\d\n(?:.*\n)*?access:\s+Public\n(?:.*\n)*?order:\s+\d+\n---\n/s, "$file has complete Resource Hub front matter");
     $site_management++ if $body =~ /^audience:\s+Site Management\s*$/m;
     $technical++ if $body =~ /^audience:\s+Technical\s*$/m;

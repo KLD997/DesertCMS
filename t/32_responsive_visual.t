@@ -10,6 +10,7 @@ my $app = _read(File::Spec->catfile($root, 'lib', 'DesertCMS', 'App.pm'));
 my $http = _read(File::Spec->catfile($root, 'lib', 'DesertCMS', 'HTTP.pm'));
 my $theme = _read(File::Spec->catfile($root, 'lib', 'DesertCMS', 'Theme.pm'));
 my $site_css = _read(File::Spec->catfile($root, 'themes', 'default', 'assets', 'site.css'));
+my $layout = _read(File::Spec->catfile($root, 'themes', 'default', 'templates', 'layout.html'));
 
 like($site_css, qr{--focus-ring: color-mix}, 'public theme defines a shared focus ring token');
 like($site_css, qr{padding: max\(12px, var\(--site-header-padding-y}, 'public header keeps a usable default vertical rhythm');
@@ -43,6 +44,15 @@ like($site_css, qr{\.link-card:hover,\s*\.resource-card:hover,\s*\.content-ref-c
 like($site_css, qr/\.slippy-map button \{[\s\S]*?min-width: 36px/, 'public map controls keep a readable tap target');
 like($site_css, qr/\.map-popup small \{[\s\S]*?text-transform: uppercase/, 'public map popup has a location-kind badge style');
 like($site_css, qr/\.showcase-resource-badge \{[\s\S]*?aspect-ratio: 4 \/ 3/, 'public Showcase resource cards keep stable preview dimensions');
+like($site_css, qr{DesertCMS design system: public kinetic typography}, 'public theme includes the opt-in kinetic typography design system');
+like($site_css, qr{\@keyframes kinetic-marquee}, 'public kinetic design system defines CSS-only marquee motion');
+like($site_css, qr{:root\[data-theme="light"\] body\.site-theme-light--kinetic}, 'public kinetic rules are scoped to the selected light preset');
+like($site_css, qr{:root\[data-theme="dark"\] body\.site-theme-dark--kinetic}, 'public kinetic rules are scoped to the selected dark preset');
+like($site_css, qr{prefers-reduced-motion: reduce}, 'public kinetic motion has a reduced-motion fallback');
+like($site_css, qr{--site-button-radius: 0px;[\s\S]*--site-card-radius: 0px;}, 'public kinetic preset forces sharp public buttons and cards only in scope');
+like($site_css, qr{font-size: clamp\(48px, var\(--site-h1-size, 104px\), 124px\);}, 'public kinetic headings use bounded token-based clamp sizing');
+unlike($site_css, qr{font-size: clamp\(48px,\s*[0-9.]+vw}, 'public kinetic headings do not add viewport-width font scaling');
+like($layout, qr{\{\{kinetic_marquee\}\}}, 'public layout exposes a kinetic marquee slot');
 like($theme, qr{_ensure_responsive_visual_polish_css}, 'theme installer upgrades existing editable theme copies');
 like($theme, qr{DesertCMS component upgrade: responsive visual polish}, 'theme upgrade block is marked to avoid duplicate appends');
 like($theme, qr{_ensure_docs_nav_layout_css}, 'theme installer upgrades existing docs nav layout');
@@ -61,8 +71,12 @@ like($theme, qr{_ensure_map_locations_js}, 'theme installer upgrades existing ma
 like($theme, qr{DesertCMS component upgrade: map location kinds}, 'map location-kind upgrade block is marked to avoid duplicate appends');
 like($theme, qr{_ensure_showcase_css}, 'theme installer upgrades existing Showcase resource card styles');
 like($theme, qr{DesertCMS component upgrade: showcase resource cards}, 'Showcase resource card upgrade block is marked to avoid duplicate appends');
+like($theme, qr{_ensure_kinetic_marquee_template}, 'theme installer upgrades existing layouts with the kinetic marquee slot');
+like($theme, qr{_ensure_kinetic_typography_css}, 'theme installer upgrades existing editable theme copies with kinetic CSS');
+like($theme, qr{DesertCMS design system: public kinetic typography}, 'kinetic CSS upgrade block is marked to avoid duplicate appends');
 
 like($app, qr{--focus-ring: color-mix}, 'admin theme defines a shared focus ring token');
+unlike($app, qr{admin-skin--kinetic}, 'admin CSS and shell do not add a kinetic admin skin');
 like($app, qr/\.topbar nav a\.active,\s*\.topbar nav a\[aria-current="page"\][^{]*\{ border-color: color-mix/, 'admin mobile nav has a clear active state');
 like($app, qr/\.admin-card-table tr \{[\s\S]*?box-shadow: 0 6px 18px/, 'admin mobile table cards have a consistent card surface');
 like($app, qr{\.notice-close \{ width: 30px; max-width: 30px; min-width: 30px; \}}, 'admin phone button rule does not stretch notice close buttons');

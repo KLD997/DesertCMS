@@ -58,6 +58,29 @@ like($vars, qr/--site-card-shadow: 0 14px 34px rgba\(16, 32, 51, 0\.12\);/, 'raw
 like($vars, qr/--site-card-radius: 16px;/, 'raw CSS vars expose selected card radius token');
 unlike($vars, qr/<style>/, 'raw CSS vars omit style wrapper');
 
+my %light_presets = map { $_->{id} => 1 } @{DesertCMS::SiteTheme::presets_for_mode('light')};
+my %dark_presets = map { $_->{id} => 1 } @{DesertCMS::SiteTheme::presets_for_mode('dark')};
+ok($light_presets{'light-kinetic'}, 'light kinetic preset is available');
+ok($dark_presets{'dark-kinetic'}, 'dark kinetic preset is available');
+
+my $kinetic_site = {
+    theme_light_preset => 'light-kinetic',
+    theme_dark_preset  => 'dark-kinetic',
+    theme_default_mode => 'dark',
+    theme_heading_font => 'bundled:space-grotesk',
+    theme_body_font    => 'bundled:space-grotesk',
+    theme_ui_font      => 'bundled:space-grotesk',
+};
+ok(DesertCMS::SiteTheme::is_kinetic($kinetic_site, 'light'), 'light kinetic preset is detected');
+ok(DesertCMS::SiteTheme::is_kinetic($kinetic_site, 'dark'), 'dark kinetic preset is detected');
+ok(DesertCMS::SiteTheme::is_kinetic($kinetic_site), 'default kinetic mode is detected');
+my $kinetic_vars = DesertCMS::SiteTheme::css_vars($kinetic_site);
+like($kinetic_vars, qr/:root,\n:root\[data-theme="light"\] \{[^}]*--paper: #FAFAFA;[^}]*--accent: #DFE104;/s, 'light kinetic CSS exposes the kinetic light palette');
+like($kinetic_vars, qr/:root\[data-theme="dark"\] \{[^}]*--paper: #09090B;[^}]*--accent: #DFE104;/s, 'dark kinetic CSS exposes the kinetic dark palette');
+like($kinetic_vars, qr/--site-heading-font: "Space Grotesk", system-ui, -apple-system/, 'kinetic font selection uses bundled Space Grotesk stack');
+my $recommended_fonts = DesertCMS::SiteTheme::recommended_fonts_for_preset('dark-kinetic');
+is($recommended_fonts->{theme_heading_font}, 'bundled:space-grotesk', 'kinetic preset recommends bundled heading font');
+
 my $legacy_dark = {
     theme_preset      => 'dark-canyon',
     theme_custom_mode => 'light',
