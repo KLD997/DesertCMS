@@ -206,6 +206,8 @@ like($page_response, qr/RSVP/, 'public Forms page includes RSVP option');
 like($page_response, qr/enctype="multipart\/form-data"/, 'public Forms page enables multipart uploads');
 like($page_response, qr/name="attachment_1"/, 'public Forms page includes upload field');
 like($page_response, qr/data-upload-preview/, 'public Forms page includes upload preview hooks');
+like($page_response, qr{<script src="/assets/site\.js"></script>}, 'public Forms page uses the public shell script');
+unlike($page_response, qr{/admin/assets/admin\.css|href="/admin"}, 'public Forms page does not leak admin shell assets or links');
 
 my $admin_response = _capture_response(sub {
     $app->_module_forms_settings_page(

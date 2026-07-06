@@ -154,6 +154,7 @@ If the module needs dynamic public behavior, route it through `DesertCMS::App`.
 Dynamic routes need:
 
 - Dispatch in `_dispatch`.
+- Public responses rendered through `DesertCMS::Renderer::render_module_page` or the shared public response helper, never admin layout helpers.
 - CSRF or request validation where applicable.
 - Rate limiting or abuse metadata for public submissions.
 - Capability checks for admin actions.
@@ -182,11 +183,12 @@ If the module uses media:
 
 - Use `DesertCMS::Media`.
 - Do not expose private source paths.
-- Use public image derivatives for images.
+- Use public image derivatives for images, including `srcset`, width, and height metadata.
 - Use Resource Downloads for public non-image files.
 - Keep form uploads private.
 - Respect media capabilities and plan limits.
 - Preserve referenced public resources during conservative cleanup.
+- Hide or replace stale media references instead of emitting a broken public `<img>` URL.
 
 Resource paths should be under `/assets/resources/` only after intentional publishing.
 
@@ -218,7 +220,7 @@ Check:
 - Plan allows Connect when contributor marketplace payments are involved.
 - Feature record has a payable item, ticket, deposit, resource, or campaign.
 
-Do not show public checkout controls when readiness fails. Keep the non-payment feature usable when possible.
+Use `DesertCMS::Commerce::payment_allowed_by_plan`, `payment_model`, and `payment_readiness` instead of open-coding workflow checks in each module. Do not show public checkout controls when readiness fails. Keep the non-payment feature usable when possible.
 
 ## Tests
 

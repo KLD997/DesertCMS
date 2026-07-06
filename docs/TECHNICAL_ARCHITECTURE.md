@@ -88,7 +88,7 @@ Admin settings can override or persist many runtime settings in SQLite. `DesertC
 | `DesertCMS::Operations` | Fleet rebuilds, backups, sitemap submission, restore testing, support bundles, and scheduled backup coordination. |
 | `DesertCMS::Upgrade` | Upgrade job staging, archive validation, rollback queueing, signed release checks, and worker job metadata. |
 | `DesertCMS::Docs` | Markdown Resource Hub parsing, front matter, access filtering, slugging, and safe Markdown rendering. |
-| `DesertCMS::Commerce` | Commerce model normalization and general shop checkout readiness. |
+| `DesertCMS::Commerce` | Commerce model normalization, shared Stripe readiness, and workflow checkout gating for Shop, Events, Bookings, Membership, and Donations. |
 | Feature modules | `Shop`, `Events`, `Directory`, `Bookings`, `Membership`, `Newsletter`, `Donations`, `Testimonials`, `Forms`, `Comments`, `Ratings`, `Analytics`, `GeoIP`. |
 
 ## Database Shape
@@ -135,6 +135,8 @@ Generated module pages yield to a published content item that claims the same UR
 
 Content with `access_policy` set to `members`, `group`, or `private` is not written into the public webroot during publish or rebuild.
 
+When module media is present, static output should use active `media_assets` records, responsive derivatives, and width or height metadata. Stale media references should not emit broken public image URLs.
+
 ## Dynamic Routes
 
 The OpenBSD installer and validator expect these FastCGI route prefixes:
@@ -177,6 +179,8 @@ Representative dynamic routes include:
 - Tokenized Postmark bounce/spam webhook routes.
 
 Static generated module pages do not need CGI after they are written. Dynamic forms, checkout, member, and webhook flows do.
+
+Dynamic public module routes should render through the same public shell as the generated site so they load `site.css`, `site.js`, public navigation, and the public home link instead of admin assets.
 
 ## Visual Blocks
 

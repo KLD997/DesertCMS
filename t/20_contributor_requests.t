@@ -170,6 +170,8 @@ like($profile_form_html, qr{Public bio}, 'profile completion form groups bio fie
 like($profile_form_html, qr{data-character-counter}, 'profile completion form includes bio character counter');
 like($profile_form_html, qr{data-upload-preview}, 'profile completion form includes upload previews');
 like($profile_form_html, qr{public-onboarding-steps}, 'profile completion form shows onboarding steps');
+like($profile_form_html, qr{<script src="/assets/site\.js"></script>}, 'profile completion form uses the public shell script');
+unlike($profile_form_html, qr{/admin/assets/admin\.css|href="/admin"}, 'profile completion form does not render admin shell assets or links');
 
 my $failed_email_ts = time;
 $db->dbh->do(
@@ -563,6 +565,7 @@ $content->rebuild_all;
 $showcase_html = _read(File::Spec->catfile($root, 'public', 'showcase', 'index.html'));
 like($showcase_html, qr{https://alexs\.desertarchives\.com/assets/media/$hash\.jpg}, 'platform Showcase renders approved contributor public assets');
 like($showcase_html, qr{Contributor Showcase Title}, 'platform Showcase keeps approved contributor asset title');
+like($showcase_html, qr{<img src="https://alexs\.desertarchives\.com/assets/media/\Q$hash\E\.jpg" alt="Contributor Showcase Image" loading="lazy" decoding="async" width="1200" height="800" class="public-media-img">}, 'platform Showcase uses shared contained media markup for contributor artwork');
 $posts_html = _read(File::Spec->catfile($root, 'public', 'posts', 'index.html'));
 like($posts_html, qr{https://alexs\.desertarchives\.com/posts/contributor-field-note/}, 'master posts index links approved contributor posts');
 like($posts_html, qr{Contributor Field Note}, 'master posts index surfaces approved contributor post title');

@@ -96,6 +96,33 @@ like(_module_catalog_text($catalog), qr/Event Payments.*paid event tickets, Stri
 my $start = DesertCMS::DateTimeLite->now(time_zone => 'UTC')->add(days => 14)->set(hour => 18, minute => 0, second => 0, nanosecond => 0);
 my $end = $start->clone->add(hours => 2);
 my $events = DesertCMS::Events->new(config => $config, db => $db);
+my $event_image_hash = 'e' x 64;
+my $event_image_path = "/assets/media/$event_image_hash.png";
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 1200, 600, 2048, ?, ?, ?)
+    },
+    undef,
+    'event-feature.png',
+    "$root/originals/event-feature.png",
+    $event_image_path,
+    'Event feature art',
+    'Event feature art',
+    'A transparent PNG event feature image.',
+    $event_image_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$event_image_hash-480.png", width => 480, height => 240 },
+            { label => 'display', path => $event_image_path, width => 1200, height => 600 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
 my $event = $events->save_event(
     title            => 'Community Workshop',
     slug             => 'community-workshop',
@@ -105,6 +132,7 @@ my $event = $events->save_event(
     timezone         => 'UTC',
     starts_at        => $start->epoch,
     ends_at          => $end->epoch,
+    feature_image_path => $event_image_path,
     location_enabled => 1,
     location_lat     => '34.101234',
     location_lng     => '-112.202345',
@@ -153,6 +181,7 @@ like($index_html, qr{Community Calendar}, 'public navigation uses configured Eve
 my $events_html = _read(File::Spec->catfile($root, 'public', 'events', 'index.html'));
 like($events_html, qr{Community Workshop}, 'events index renders event title');
 like($events_html, qr{Subscribe with calendar}, 'events index links ICS feed');
+like($events_html, qr{<img src="/assets/media/e{64}\.png" alt="Event feature art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/e{64}-480\.png 480w[^"]*/assets/media/e{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'events index renders responsive event media through the public image helper');
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'events', 'community-workshop', $event_key, 'index.html'));
 like($detail_html, qr{application/ld\+json}, 'event occurrence renders schema.org Event JSON');
 like($detail_html, qr{Civic Hall}, 'event occurrence renders location label');
@@ -177,6 +206,9 @@ my $public_events = _capture_response(sub {
     $app->_dispatch_events(_event_request('/events'));
 });
 like($public_events, qr{Community Workshop}, 'public /events route renders event list');
+like($public_events, qr{<script src="/assets/site\.js"></script>}, 'dynamic /events route uses the public shell script');
+unlike($public_events, qr{/admin/assets/admin\.css}, 'dynamic /events route does not load admin CSS');
+like($public_events, qr{<img src="/assets/media/e{64}\.png" alt="Event feature art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/e{64}-480\.png 480w[^"]*/assets/media/e{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'dynamic /events route renders responsive event media');
 my $public_detail = _capture_response(sub {
     $app->_dispatch_events(_event_request("/events/community-workshop/$event_key"));
 });

@@ -128,6 +128,9 @@ like($shop_catalog_html, qr{<h1>Catalog</h1>}, 'shop catalog uses catalog headin
 like($shop_catalog_html, qr{products, services, digital items, portfolio samples, and selected media}, 'shop catalog describes broad catalog items');
 like($shop_catalog_html, qr{rights-option rights-option--personal}, 'shop catalog renders purchase options');
 like($shop_catalog_html, qr{data-site-menu-toggle}, 'shop catalog includes shared mobile menu control');
+like($shop_catalog_html, qr{<script src="/assets/site\.js"></script>}, 'shop catalog route uses the public shell script');
+unlike($shop_catalog_html, qr{/admin/assets/admin\.css|href="/admin"}, 'shop catalog route stays on the public shell');
+like($shop_catalog_html, qr{<img src="/assets/media/a{64}\.jpg" alt="Mesquite in late light" loading="lazy" decoding="async" width="1200" height="800" class="public-media-img">}, 'shop catalog renders shared public media markup for listing art');
 unlike($shop_catalog_html, qr{Shop Photographic Work|Photographs available for rights purchase|selected photographs}, 'shop catalog no longer uses photography-only product copy');
 
 my $bad_checkout = eval {

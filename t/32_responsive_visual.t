@@ -32,6 +32,10 @@ like($site_css, qr{DesertCMS component upgrade: public donations v2}, 'public Do
 like($site_css, qr{\.donation-priority \{ display: grid; grid-template-columns: minmax\(220px, 0\.52fr\) minmax\(0, 1\.48fr\);}, 'public Donations detail puts the donate section in stable top tracks');
 like($site_css, qr{\.donation-body-list \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\);}, 'public Donations campaign body lists wrap into readable tiles');
 like($site_css, qr{\.donation-amount-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 106px\), 1fr\)\);}, 'public Donations amount options wrap as buttons');
+like($site_css, qr{DesertCMS component upgrade: public module media fit|\.public-media-img \{ display: block; width: 100%; background: transparent; \}}, 'public module media fit rules exist for shared image rendering');
+like($site_css, qr/\.event-card \.public-media-img,\s*\.shop-card \.public-media-img \{[\s\S]*?object-fit: contain;[\s\S]*?object-position: center;/, 'public module cards can contain transparent artwork without forced cropping');
+like($site_css, qr/\.showcase-card--image \.public-media-img \{[\s\S]*?object-fit: contain;[\s\S]*?background: transparent;/, 'public Showcase image cards contain transparent artwork cleanly');
+like($site_css, qr/\.directory-detail-image\.public-media-img \{[\s\S]*?max-height: min\(520px, 70vh\);[\s\S]*?object-fit: contain;/, 'public module detail images keep contained sizing for logos and transparent artwork');
 like($site_css, qr{\.public-upload-preview \{ grid-template-columns: 38px minmax\(0, 1fr\); \}}, 'public upload previews compact cleanly on phones');
 like($site_css, qr{\.link-card:hover,\s*\.resource-card:hover,\s*\.content-ref-card:hover,\s*\.social-link:hover}m, 'public cards share hover treatment');
 like($site_css, qr/\.slippy-map button \{[\s\S]*?min-width: 36px/, 'public map controls keep a readable tap target');

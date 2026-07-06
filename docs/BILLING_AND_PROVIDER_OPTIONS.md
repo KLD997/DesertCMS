@@ -121,6 +121,8 @@ Readiness can depend on:
 
 If checkout is not ready, the public surface should still render the non-payment part of the feature when possible.
 
+`Settings > Payments` is the shared readiness screen for Shop / Catalog, Events, Bookings / Appointments, Membership / Gated Content, and Donations / Fundraising. Module setup screens should point operators back to that page for Stripe keys, webhook secrets, commerce model, and payout-state issues instead of duplicating provider setup.
+
 ## Custom Postmark Sender
 
 By default, contributor sites inherit the master platform Postmark configuration.

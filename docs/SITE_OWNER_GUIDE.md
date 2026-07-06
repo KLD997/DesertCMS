@@ -168,6 +168,8 @@ Current first-party features include:
 
 Payment features are separate from content features. For example, Events can collect free RSVPs without Event Payments, and Bookings can collect requests without Booking Deposits.
 
+Use `Settings > Payments` as the central Stripe setup page for Shop, Events, Bookings, Membership, and Donations. The feature pages describe what each module can collect, but provider readiness, webhook settings, and commerce mode live in one place.
+
 ## Billing
 
 Billing explains what a hosted contributor site can use.

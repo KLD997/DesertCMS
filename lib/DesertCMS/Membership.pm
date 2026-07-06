@@ -3,6 +3,7 @@ package DesertCMS::Membership;
 use strict;
 use warnings;
 use JSON::PP qw(decode_json);
+use DesertCMS::Commerce;
 use DesertCMS::Docs;
 use DesertCMS::Media;
 use DesertCMS::Modules;
@@ -37,8 +38,7 @@ sub enabled {
 
 sub membership_payments_allowed_by_plan {
     my ($self) = @_;
-    return 0 unless $self->enabled;
-    return _plan_feature_enabled(_settings($self), 'membership_payments', 1);
+    return DesertCMS::Commerce::payment_allowed_by_plan(_settings($self), 'membership');
 }
 
 sub checkout_ready {
@@ -48,44 +48,7 @@ sub checkout_ready {
 
 sub payment_readiness {
     my ($self) = @_;
-    my $settings = _settings($self);
-    my $enabled = $self->enabled;
-    my $allowed = $self->membership_payments_allowed_by_plan;
-    my $model = lc($settings->{commerce_model} || '');
-    $model =~ s/[-\s]+/_/g;
-    my $model_allows = $model =~ /\A(?:master_owned|contributor_owned|platform_marketplace)\z/ ? 1 : 0;
-    my $stripe_key = length($settings->{stripe_secret_key} || '') ? 1 : 0;
-    my $webhook = length($settings->{stripe_webhook_secret} || '') ? 1 : 0;
-    my $marketplace = $model eq 'platform_marketplace' ? 1 : 0;
-    my $connect = $marketplace
-        ? (($settings->{stripe_connect_account_id} || '')
-            && ($settings->{stripe_connect_charges_enabled} || 0)
-            && ($settings->{stripe_connect_payouts_enabled} || 0) ? 1 : 0)
-        : 1;
-
-    my ($state, $label, $summary);
-    if (!$enabled) {
-        ($state, $label, $summary) = ('neutral', 'Membership disabled', 'Enable Membership before configuring paid member access.');
-    } elsif (!$allowed) {
-        ($state, $label, $summary) = ('warn', 'Payments locked', 'Member accounts and gated resources are available; paid access requires Membership Payments.');
-    } elsif (!$model_allows) {
-        ($state, $label, $summary) = ('warn', 'Payments disabled', 'Choose a Stripe commerce model before paid member access can be used.');
-    } elsif (!$stripe_key || !$webhook) {
-        ($state, $label, $summary) = ('warn', 'Stripe not ready', 'Configure Stripe key and webhook secret before paid member access can be used.');
-    } elsif (!$connect) {
-        ($state, $label, $summary) = ('warn', 'Payouts not ready', 'Contributor marketplace paid access needs an active Stripe connected account.');
-    } else {
-        ($state, $label, $summary) = ('ok', 'Ready', 'Membership Payments can create paid member-resource or subscription records.');
-    }
-
-    return {
-        state => $state,
-        label => $label,
-        summary => $summary,
-        checkout_enabled => ($enabled && $allowed && $model_allows && $stripe_key && $webhook && $connect) ? 1 : 0,
-        payment_model => $model || 'disabled',
-        allowed_by_plan => $allowed ? 1 : 0,
-    };
+    return DesertCMS::Commerce::payment_readiness($self->{config}, _settings($self), workflow => 'membership');
 }
 
 sub groups {

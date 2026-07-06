@@ -2508,6 +2508,9 @@ main:has(.events-page) { width: min(1080px, calc(100% - 32px)); }
 .event-card img,
 .event-card-date { width: 100%; aspect-ratio: 4 / 3; background: var(--field); }
 .event-card img { display: block; object-fit: cover; }
+.public-media-img { display: block; width: 100%; background: transparent; }
+.event-card .public-media-img,
+.shop-card .public-media-img { aspect-ratio: 4 / 3; object-fit: contain; object-position: center; background: transparent; }
 .event-card-date { display: grid; place-items: center; color: var(--accent); font: 900 30px/1 var(--site-ui-font, system-ui, sans-serif); letter-spacing: 0; }
 .event-card-body { display: grid; gap: 10px; align-content: start; padding: 18px; }
 .event-time { justify-self: start; display: inline-flex; align-items: center; min-height: 26px; padding: 0 9px; border: 1px solid var(--site-card-border, var(--line)); border-radius: 999px; background: var(--field); color: var(--muted); font: 800 12px/1 var(--site-ui-font, system-ui, sans-serif); }
@@ -2524,6 +2527,9 @@ main:has(.events-page) { width: min(1080px, calc(100% - 32px)); }
 .event-meta dd { display: grid; gap: 4px; margin: 0; color: var(--ink); font-weight: 800; overflow-wrap: anywhere; }
 .event-meta small { color: var(--muted); font-size: 12px; font-weight: 700; }
 .event-body { max-width: 76ch; }
+.directory-detail,
+.booking-detail { display: grid; gap: 24px; }
+.directory-detail-image.public-media-img { justify-self: start; width: min(100%, 820px); max-width: 100%; height: auto; max-height: min(520px, 70vh); object-fit: contain; object-position: center; background: transparent; }
 .event-action-panel { display: grid; gap: 14px; padding: clamp(16px, 3vw, 22px); border: 1px solid var(--site-card-border, var(--line)); border-radius: var(--site-card-radius, 8px); background: var(--site-card-bg, var(--panel)); box-shadow: var(--site-card-shadow, none); }
 .event-action-panel h2 { margin: 0; font-family: var(--site-heading-font, Georgia, "Times New Roman", serif); font-size: var(--site-h2-size, 28px); line-height: 1.15; letter-spacing: 0; }
 .event-ticket-grid { display: grid; gap: 10px; }
@@ -2818,3 +2824,11 @@ main:has(.docs-index), main:has(.docs-page) { width: min(1120px, calc(100% - 32p
 .docs-meta-strip div { display: grid; gap: 3px; min-width: 0; }
 .docs-meta-strip span { color: var(--muted); font: 800 11px/1.25 var(--site-ui-font, system-ui, sans-serif); text-transform: uppercase; letter-spacing: 0.08em; }
 .docs-meta-strip strong { color: var(--ink); font: 800 13px/1.3 var(--site-ui-font, system-ui, sans-serif); overflow-wrap: anywhere; }
+
+/* DesertCMS component upgrade: public module media fit. */
+.public-media-img { display: block; width: 100%; background: transparent; }
+.event-card .public-media-img,
+.shop-card .public-media-img,
+.showcase-card--image .public-media-img { aspect-ratio: 4 / 3; object-fit: contain; object-position: center; background: transparent; }
+.directory-detail, .booking-detail { display: grid; gap: 24px; }
+.directory-detail-image.public-media-img { justify-self: start; width: min(100%, 820px); max-width: 100%; height: auto; max-height: min(520px, 70vh); object-fit: contain; object-position: center; background: transparent; }

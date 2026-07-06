@@ -193,6 +193,12 @@ like($sitemap, qr{https://members\.example\.test/members/</loc>}, 'sitemap inclu
 unlike($sitemap, qr{client-notes}, 'sitemap omits gated member page');
 
 my $app = DesertCMS::App->new;
+my $login_response = _capture_response(sub {
+    $app->_dispatch_members(_member_request('/members/login'));
+});
+like($login_response, qr{Status: 200 OK}, 'member login route renders');
+like($login_response, qr{<script src="/assets/site\.js"></script>}, 'member login route uses the public shell script');
+unlike($login_response, qr{/admin/assets/admin\.css|href="/admin"}, 'member login route does not render admin shell assets or links');
 my $dashboard = _capture_response(sub {
     $app->_dispatch_members(_member_request('/members', 'GET', {}, $session_token));
 });
@@ -201,6 +207,8 @@ like($dashboard, qr{Client Notes}, 'member dashboard lists members-only content'
 like($dashboard, qr{Client Project}, 'member dashboard lists group-only content');
 like($dashboard, qr{Member Guide}, 'member dashboard lists member-only docs');
 like($dashboard, qr{Private Guide}, 'member dashboard lists protected resources');
+like($dashboard, qr{<script src="/assets/site\.js"></script>}, 'member dashboard uses the public shell script');
+unlike($dashboard, qr{/admin/assets/admin\.css|href="/admin"}, 'member dashboard does not render admin shell assets or links');
 
 my $content_response = _capture_response(sub {
     $app->_dispatch_members(_member_request('/members/content/client-project', 'GET', {}, $session_token));

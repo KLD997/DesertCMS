@@ -736,6 +736,7 @@ sub _media_img_tag {
         push @attrs, 'srcset="' . escape_html($srcset) . '"';
         push @attrs, 'sizes="' . escape_html($opts{sizes} || '(max-width: 760px) 100vw, 1120px') . '"';
     }
+    push @attrs, 'class="' . escape_html($opts{class}) . '"' if defined $opts{class} && length $opts{class};
     return '<img ' . join(' ', @attrs) . '>';
 }
 
@@ -1688,7 +1689,13 @@ sub _showcase_image_card {
     if ($item->{width} && $item->{height}) {
         $dimensions = '<small>' . escape_html(int($item->{width}) . ' x ' . int($item->{height})) . '</small>';
     }
-    my $image = _media_img_tag($src, $item->{alt_text} || $title, $item, sizes => '(max-width: 760px) 100vw, 360px');
+    my $image = _media_img_tag(
+        $src,
+        $item->{alt_text} || $title,
+        $item,
+        sizes => '(max-width: 760px) 100vw, 360px',
+        class => 'public-media-img',
+    );
     return <<"HTML";
 <figure class="portfolio-card showcase-card showcase-card--image">
   $image
@@ -2141,7 +2148,7 @@ sub _write_directory_pages {
         : '';
     my $cards = '';
     for my $entry (@{ $directory->published_entries(limit => 500) }) {
-        $cards .= _directory_static_card($entry);
+        $cards .= _directory_static_card($db, $entry);
         _write_directory_detail_page($config, $db, $entry);
     }
     $cards ||= '<p class="events-empty">No directory entries yet.</p>';
@@ -2178,8 +2185,11 @@ sub _write_directory_detail_page {
     my $kind = escape_html(DesertCMS::Directory::kind_label($entry->{kind}));
     my $body = escape_html($entry->{body} || '');
     $body =~ s/\n/<br>/g;
-    my $image = escape_html($entry->{image_path} || '');
-    my $image_html = length $image ? qq{<img class="directory-detail-image" src="$image" alt="">} : '';
+    my $image = $entry->{image_path} || '';
+    my $asset = _media_asset_for_path($db, $image);
+    my $image_html = $asset->{public_path}
+        ? _media_img_tag($image, '', $asset, class => 'directory-detail-image public-media-img', loading => 'eager', sizes => '(max-width: 760px) 100vw, 720px')
+        : '';
     my $contact = _directory_static_contact_html($entry);
     my $location = _directory_static_location_html($entry);
     my $terms = _directory_static_terms_html($entry);
@@ -2262,13 +2272,16 @@ sub _remove_directory_artifacts {
 }
 
 sub _directory_static_card {
-    my ($entry) = @_;
+    my ($db, $entry) = @_;
     my $slug = escape_html($entry->{slug} || '');
     my $title = escape_html($entry->{title} || 'Directory entry');
     my $summary = escape_html($entry->{summary} || '');
     my $kind = escape_html(DesertCMS::Directory::kind_label($entry->{kind}));
-    my $image = escape_html($entry->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
+    my $image = $entry->{image_path} || '';
+    my $asset = _media_asset_for_path($db, $image);
+    my $image_html = $asset->{public_path}
+        ? _media_img_tag($image, '', $asset, class => 'public-media-img', sizes => '(max-width: 760px) 100vw, 360px')
+        : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
     my $location = escape_html($entry->{location_label} || '');
     my $location_html = length $location ? qq{<span>$location</span>} : '';
     return <<"HTML";
@@ -2351,7 +2364,7 @@ sub _write_bookings_pages {
     my $safe_intro = escape_html($intro);
     my $cards = '';
     for my $service (@{ $bookings->published_services(limit => 500) }) {
-        $cards .= _booking_static_card($service);
+        $cards .= _booking_static_card($db, $service);
         _write_booking_detail_page($config, $db, $bookings, $service, $site);
     }
     $cards ||= '<p class="events-empty">No booking services are available yet.</p>';
@@ -2391,8 +2404,11 @@ sub _write_booking_detail_page {
     my $availability_html = length $availability
         ? qq{<section class="event-action-panel"><h2>Availability</h2><p>$availability</p></section>}
         : '';
-    my $image = escape_html($service->{image_path} || '');
-    my $image_html = length $image ? qq{<img class="directory-detail-image" src="$image" alt="">} : '';
+    my $image = $service->{image_path} || '';
+    my $asset = _media_asset_for_path($db, $image);
+    my $image_html = $asset->{public_path}
+        ? _media_img_tag($image, '', $asset, class => 'directory-detail-image public-media-img', loading => 'eager', sizes => '(max-width: 760px) 100vw, 720px')
+        : '';
     my $meta = _booking_static_meta($bookings, $service);
     my $form = _booking_static_request_form($bookings, $service, $site);
     my $slug = _safe_slug_segment($service->{slug} || 'service');
@@ -2429,13 +2445,16 @@ sub _remove_bookings_artifacts {
 }
 
 sub _booking_static_card {
-    my ($service) = @_;
+    my ($db, $service) = @_;
     my $slug = escape_html($service->{slug} || '');
     my $title = escape_html($service->{title} || 'Booking service');
     my $summary = escape_html($service->{summary} || '');
     my $kind = escape_html(DesertCMS::Bookings::service_kind_label($service->{service_kind}));
-    my $image = escape_html($service->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
+    my $image = $service->{image_path} || '';
+    my $asset = _media_asset_for_path($db, $image);
+    my $image_html = $asset->{public_path}
+        ? _media_img_tag($image, '', $asset, class => 'public-media-img', sizes => '(max-width: 760px) 100vw, 360px')
+        : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
     my $location = escape_html($service->{location_label} || '');
     my $location_html = length $location ? qq{<span>$location</span>} : '';
     return <<"HTML";
@@ -2538,8 +2557,11 @@ sub _write_events_pages {
         my $time = escape_html(DesertCMS::Events::format_time_label($event, $row->{starts_at}, $row->{ends_at}));
         my $location = escape_html($row->{location_label} || '');
         my $location_html = length $location ? qq{<span>$location</span>} : '';
-        my $image = escape_html($row->{feature_image_path} || '');
-        my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . escape_html($key) . '</div>';
+        my $image = $row->{feature_image_path} || '';
+        my $asset = _media_asset_for_path($db, $image);
+        my $image_html = $asset->{public_path}
+            ? _media_img_tag($image, '', $asset, class => 'public-media-img', sizes => '(max-width: 760px) 100vw, 360px')
+            : '<div class="event-card-date" aria-hidden="true">' . escape_html($key) . '</div>';
         $cards .= <<"HTML";
 <a class="event-card" href="$url">
   $image_html
@@ -3053,7 +3075,7 @@ sub _write_testimonials_pages {
     my $intro = $site->{testimonials_intro} || 'Reviews, recommendations, client stories, customer feedback, and community praise.';
     my $safe_title = escape_html($title);
     my $safe_intro = escape_html($intro);
-    my $cards = join '', map { _testimonial_static_card($_) } @{ $testimonials->published_testimonials(limit => 500) };
+    my $cards = join '', map { _testimonial_static_card($db, $_) } @{ $testimonials->published_testimonials(limit => 500) };
     $cards ||= '<p class="events-empty">No testimonials yet.</p>';
     my $submit = _truthy($site->{testimonials_submissions_enabled})
         ? '<a class="module-action-link" href="/testimonials/submit/">Share a testimonial</a>'
@@ -3128,7 +3150,7 @@ sub _remove_testimonials_artifacts {
 }
 
 sub _testimonial_static_card {
-    my ($row) = @_;
+    my ($db, $row) = @_;
     my $author = escape_html($row->{author_name} || 'Reviewer');
     my $quote = escape_html($row->{quote} || '');
     my $body = escape_html($row->{body} || '');
@@ -3139,8 +3161,11 @@ sub _testimonial_static_card {
     my $source = escape_html(DesertCMS::Testimonials::source_type_label($row->{source_type}));
     my $related = escape_html($row->{related_directory_title} || $row->{related_booking_title} || '');
     my $related_html = length $related ? "<small>Related to $related</small>" : '';
-    my $image = escape_html($row->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">"' . substr($author, 0, 1) . '</div>';
+    my $image = $row->{image_path} || '';
+    my $asset = _media_asset_for_path($db, $image);
+    my $image_html = $asset->{public_path}
+        ? _media_img_tag($image, '', $asset, class => 'public-media-img', sizes => '(max-width: 760px) 100vw, 360px')
+        : '<div class="event-card-date" aria-hidden="true">' . substr($author, 0, 1) . '</div>';
     return <<"HTML";
 <article class="event-card directory-card testimonial-card">
   $image_html

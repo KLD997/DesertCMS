@@ -12,7 +12,7 @@ It is built around three major ideas:
 
 The formal hosted site is [desertcms.com](https://desertcms.com/).
 
-Current release: DesertCMS v2.0.2. This patch release fixes Stripe-hosted payment redirects from public donation and commerce forms.
+Current release: DesertCMS v2.0.2. This patch release fixes public module rendering, shared Stripe readiness, responsive media handling, and the recent donation and commerce checkout regressions.
 
 ## Documentation
 Start with:

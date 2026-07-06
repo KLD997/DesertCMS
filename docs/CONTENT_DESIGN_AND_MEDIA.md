@@ -146,12 +146,14 @@ Every upload starts as a private source asset.
 
 | Asset type | Private source | Public output |
 | --- | --- | --- |
-| Images | Original upload stays outside the public webroot. | Optimized JPEG derivative, responsive sizes, dimensions, and public image metadata. |
+| Images | Original upload stays outside the public webroot. | Optimized public image derivative, responsive sizes, dimensions, public image metadata, and preserved PNG or WebP transparency when the source format supports it. |
 | Documents and data files | PDF, TXT, Markdown, CSV, TSV, JSON, DOCX, XLSX, and PPTX stay private. | Public Resource Download only when intentionally published. |
 | Audio | MP3, M4A, WAV, OGG, WebM audio, and FLAC stay private. | Public Resource Download only when intentionally published. |
 | Video | MP4, M4V, MOV, WebM, and OGV stay private. | Public Resource Download only when intentionally published. |
 
 Public pages should reference optimized image derivatives or public resource copies, not private source paths.
+
+Module pages should use the same derivative pipeline as pages and posts. Campaign art, service art, logos, and other transparent graphics should stay transparent, and stale media references should disappear instead of rendering a broken image.
 
 ## Media Metadata
 

@@ -89,6 +89,33 @@ like(_module_catalog_text($catalog), qr/Bookings \/ Appointments.*service listin
 like(_module_catalog_text($catalog), qr/Booking Deposits.*Stripe Checkout deposits/s, 'feature catalog describes separate Booking Deposits entitlement');
 
 my $bookings = DesertCMS::Bookings->new(config => $config, db => $db);
+my $booking_image_hash = 'b' x 64;
+my $booking_image_path = "/assets/media/$booking_image_hash.png";
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 1200, 600, 2048, ?, ?, ?)
+    },
+    undef,
+    'booking-service.png',
+    "$root/originals/booking-service.png",
+    $booking_image_path,
+    'Booking service art',
+    'Booking service art',
+    'A transparent PNG booking service image.',
+    $booking_image_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$booking_image_hash-480.png", width => 480, height => 240 },
+            { label => 'display', path => $booking_image_path, width => 1200, height => 600 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
 my $service = $bookings->save_service(
     title                => 'Discovery Consultation',
     slug                 => 'discovery-consultation',
@@ -104,6 +131,7 @@ my $service = $bookings->save_service(
     deposit_amount       => '50.00',
     deposit_currency     => 'usd',
     featured             => 1,
+    image_path           => $booking_image_path,
     location_enabled     => 1,
     location_lat         => '34.101234',
     location_lng         => '-112.202345',
@@ -113,6 +141,16 @@ my $service = $bookings->save_service(
 ok($service->{id}, 'booking service is saved');
 is($service->{service_kind}, 'consultation', 'booking service stores service kind');
 is($service->{deposit_amount_cents}, 5000, 'booking service stores deposit amount separately from shop/event payments');
+my $stale_booking_path = '/assets/media/stale-booking.png';
+my $stale_service = $bookings->save_service(
+    title        => 'Broken Service',
+    slug         => 'broken-service',
+    service_kind => 'session',
+    status       => 'published',
+    summary      => 'This service keeps a stale image reference.',
+    image_path   => $stale_booking_path,
+);
+ok($stale_service->{id}, 'booking service with stale image reference is saved');
 
 $content->rebuild_all;
 ok(-f File::Spec->catfile($root, 'public', 'bookings', 'index.html'), 'bookings index is generated');
@@ -125,12 +163,15 @@ like($index_html, qr{Appointments}, 'public navigation uses configured Bookings 
 my $bookings_html = _read(File::Spec->catfile($root, 'public', 'bookings', 'index.html'));
 like($bookings_html, qr{Discovery Consultation}, 'bookings index renders published service');
 like($bookings_html, qr{Consultation}, 'bookings index renders service type label');
+like($bookings_html, qr{<img src="/assets/media/b{64}\.png" alt="Booking service art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/b{64}-480\.png 480w[^"]*/assets/media/b{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'bookings index renders responsive service media');
+unlike($bookings_html, qr/\Q$stale_booking_path\E/, 'bookings index hides stale image references');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'bookings', 'discovery-consultation', 'index.html'));
 like($detail_html, qr{Weekdays by request}, 'booking detail renders availability text');
 like($detail_html, qr{Request Booking}, 'booking detail renders request form');
 like($detail_html, qr{online deposits are not available}, 'booking detail hides deposit checkout when payments are not ready');
 like($detail_html, qr{View location}, 'booking detail links to map when coordinates exist');
+like($detail_html, qr{<img src="/assets/media/b{64}\.png" alt="Booking service art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/b{64}-480\.png 480w[^"]*/assets/media/b{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 720px" class="directory-detail-image public-media-img">}, 'booking detail renders responsive service media');
 
 my $sitemap = _read(File::Spec->catfile($root, 'public', 'sitemap.xml'));
 like($sitemap, qr{https://bookings\.example\.test/bookings/</loc>}, 'sitemap includes bookings index');
@@ -148,10 +189,15 @@ my $public_bookings = _capture_response(sub {
     $app->_dispatch_bookings(_booking_request('/bookings'));
 });
 like($public_bookings, qr{Discovery Consultation}, 'public /bookings route renders service list');
+like($public_bookings, qr{<script src="/assets/site\.js"></script>}, 'dynamic /bookings route uses the public shell script');
+unlike($public_bookings, qr{/admin/assets/admin\.css}, 'dynamic /bookings route does not load admin CSS');
+like($public_bookings, qr{<img src="/assets/media/b{64}\.png" alt="Booking service art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/b{64}-480\.png 480w[^"]*/assets/media/b{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'dynamic /bookings route renders responsive service media');
+unlike($public_bookings, qr/\Q$stale_booking_path\E/, 'dynamic /bookings route hides stale image references');
 my $public_detail = _capture_response(sub {
     $app->_dispatch_bookings(_booking_request('/bookings/discovery-consultation'));
 });
 like($public_detail, qr{We review scope}, 'public booking detail route renders service body');
+like($public_detail, qr{<img src="/assets/media/b{64}\.png" alt="Booking service art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/b{64}-480\.png 480w[^"]*/assets/media/b{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 720px" class="directory-detail-image public-media-img">}, 'dynamic booking detail renders responsive service media');
 
 my $submit_response = _capture_response(sub {
     $app->_dispatch_bookings(_booking_request('/bookings/discovery-consultation/request', 'POST', {

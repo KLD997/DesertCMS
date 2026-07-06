@@ -41,19 +41,12 @@ sub enabled {
 
 sub donation_payments_allowed_by_plan {
     my ($self) = @_;
-    return _plan_feature_enabled(_settings($self), 'donation_payments', 1);
+    return DesertCMS::Commerce::payment_allowed_by_plan(_settings($self), 'donations');
 }
 
 sub payment_model {
     my ($self) = @_;
-    my $settings = _settings($self);
-    my $explicit = DesertCMS::Commerce::normalize_model($settings->{commerce_model} || $self->{config}->get('commerce_model') || '');
-    return $explicit if length $explicit;
-    return 'disabled' unless $self->donation_payments_allowed_by_plan;
-    if (DesertCMS::Commerce::is_contributor_instance($self->{config})) {
-        return _truthy($settings->{contributor_allow_stripe_connect}) ? 'platform_marketplace' : 'disabled';
-    }
-    return 'master_owned';
+    return DesertCMS::Commerce::payment_model($self->{config}, _settings($self), workflow => 'donations');
 }
 
 sub checkout_ready {
@@ -63,45 +56,7 @@ sub checkout_ready {
 
 sub payment_readiness {
     my ($self) = @_;
-    my $settings = _settings($self);
-    my $enabled = $self->enabled;
-    my $allowed = $self->donation_payments_allowed_by_plan;
-    my $model = $self->payment_model;
-    my $model_allows = DesertCMS::Commerce::model_allows_checkout($model);
-    my $marketplace = $model eq 'platform_marketplace' ? 1 : 0;
-    my $stripe_key = length($settings->{stripe_secret_key} || '') ? 1 : 0;
-    my $webhook = length($settings->{stripe_webhook_secret} || '') ? 1 : 0;
-    my $connect_account = length($settings->{stripe_connect_account_id} || '') ? 1 : 0;
-    my $connect_allowed = $allowed && _truthy($settings->{contributor_allow_stripe_connect}) ? 1 : 0;
-
-    my ($state, $label, $summary) = ('neutral', 'Disabled', 'Donation payments are disabled.');
-    if (!$enabled) {
-        ($state, $label, $summary) = ('neutral', 'Donations disabled', 'Enable Donations before accepting public contributions.');
-    } elsif (!$allowed) {
-        ($state, $label, $summary) = ('warn', 'Payments locked', 'Campaign pages are available; Stripe donation checkout requires Donation Payments.');
-    } elsif (!$model_allows || $model eq 'disabled') {
-        ($state, $label, $summary) = ('neutral', 'Payments disabled', 'Choose a checkout-capable commerce model before taking donations.');
-    } elsif ($marketplace && !$connect_allowed) {
-        ($state, $label, $summary) = ('warn', 'Plan locked', 'This plan does not include contributor payout setup.');
-    } elsif (!$stripe_key || !$webhook) {
-        ($state, $label, $summary) = ('warn', 'Needs Stripe', $marketplace ? 'Marketplace donations need inherited master Stripe credentials and webhook secret.' : 'Donations need both a Stripe secret key and webhook secret.');
-    } elsif ($marketplace && !$connect_account) {
-        ($state, $label, $summary) = ('warn', 'Connect payouts', 'Connect a Stripe payout account before this site can take donations.');
-    } else {
-        ($state, $label, $summary) = ('ok', 'Ready', $marketplace ? 'Donation checkout is ready for platform marketplace payouts.' : 'Donation checkout is ready.');
-    }
-
-    return {
-        state            => $state,
-        label            => $label,
-        summary          => $summary,
-        model            => $model,
-        checkout_allowed => $allowed ? 1 : 0,
-        checkout_enabled => ($enabled && $allowed && $model_allows && $stripe_key && $webhook && (!$marketplace || $connect_account)) ? 1 : 0,
-        marketplace      => $marketplace,
-        stripe_ready     => ($stripe_key && $webhook) ? 1 : 0,
-        connect_account  => $connect_account,
-    };
+    return DesertCMS::Commerce::payment_readiness($self->{config}, _settings($self), workflow => 'donations');
 }
 
 sub campaigns_admin {

@@ -5,7 +5,7 @@ use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempdir);
 use Cwd qw(getcwd);
-use JSON::PP qw(decode_json);
+use JSON::PP qw(decode_json encode_json);
 
 use FindBin;
 use lib "$FindBin::Bin/../lib";
@@ -83,6 +83,33 @@ my $catalog = DesertCMS::Modules::catalog($settings, config => $config);
 like(_module_catalog_text($catalog), qr/Directory.*people, businesses, artists, contributors, vendors, members, places, organizations, and resources/s, 'feature catalog describes Directory');
 
 my $directory = DesertCMS::Directory->new(config => $config, db => $db);
+my $directory_image_hash = 'c' x 64;
+my $directory_image_path = "/assets/media/$directory_image_hash.png";
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 1200, 600, 2048, ?, ?, ?)
+    },
+    undef,
+    'directory-entry.png',
+    "$root/originals/directory-entry.png",
+    $directory_image_path,
+    'Directory listing art',
+    'Directory listing art',
+    'A transparent PNG directory image.',
+    $directory_image_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$directory_image_hash-480.png", width => 480, height => 240 },
+            { label => 'display', path => $directory_image_path, width => 1200, height => 600 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
 my $entry = $directory->save_entry(
     title            => 'Civic Arts Center',
     slug             => 'civic-arts-center',
@@ -96,6 +123,7 @@ my $entry = $directory->save_entry(
     categories_text  => 'Venues, Resources',
     tags_text        => 'arts, workshops',
     featured         => 1,
+    image_path       => $directory_image_path,
     location_enabled => 1,
     location_lat     => '34.101234',
     location_lng     => '-112.202345',
@@ -104,6 +132,16 @@ my $entry = $directory->save_entry(
 );
 ok($entry->{id}, 'directory entry is saved');
 is($entry->{kind}, 'place', 'directory entry stores entry kind');
+my $stale_image_path = '/assets/media/stale-directory.png';
+my $stale_entry = $directory->save_entry(
+    title      => 'Broken Listing',
+    slug       => 'broken-listing',
+    kind       => 'resource',
+    status     => 'published',
+    summary    => 'This entry keeps a stale image reference.',
+    image_path => $stale_image_path,
+);
+ok($stale_entry->{id}, 'directory entry with stale image reference is saved');
 
 $content->rebuild_all;
 ok(-f File::Spec->catfile($root, 'public', 'directory', 'index.html'), 'directory index is generated');
@@ -118,6 +156,8 @@ my $directory_html = _read(File::Spec->catfile($root, 'public', 'directory', 'in
 like($directory_html, qr{Civic Arts Center}, 'directory index renders published entry');
 like($directory_html, qr{Place}, 'directory index renders entry type label');
 like($directory_html, qr{Suggest a listing}, 'directory index links public submission page');
+like($directory_html, qr{<img src="/assets/media/c{64}\.png" alt="Directory listing art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/c{64}-480\.png 480w[^"]*/assets/media/c{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'directory index renders responsive listing media');
+unlike($directory_html, qr/\Q$stale_image_path\E/, 'directory index hides stale image references');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'directory', 'civic-arts-center', 'index.html'));
 like($detail_html, qr{Civic Arts Center}, 'directory detail renders title');
@@ -125,6 +165,7 @@ like($detail_html, qr{hello\@arts\.example\.test}, 'directory detail renders con
 like($detail_html, qr{Civic Hall}, 'directory detail renders location label');
 like($detail_html, qr{View location}, 'directory detail links to map when coordinates exist');
 like($detail_html, qr{Venues}, 'directory detail renders categories');
+like($detail_html, qr{<img src="/assets/media/c{64}\.png" alt="Directory listing art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/c{64}-480\.png 480w[^"]*/assets/media/c{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 720px" class="directory-detail-image public-media-img">}, 'directory detail renders responsive media without broken fallbacks');
 
 my $sitemap = _read(File::Spec->catfile($root, 'public', 'sitemap.xml'));
 like($sitemap, qr{https://directory\.example\.test/directory/</loc>}, 'sitemap includes directory index');
@@ -143,10 +184,15 @@ my $public_directory = _capture_response(sub {
     $app->_dispatch_directory(_directory_request('/directory'));
 });
 like($public_directory, qr{Civic Arts Center}, 'public /directory route renders entry list');
+like($public_directory, qr{<script src="/assets/site\.js"></script>}, 'dynamic /directory route uses the public shell script');
+unlike($public_directory, qr{/admin/assets/admin\.css}, 'dynamic /directory route does not load admin CSS');
+like($public_directory, qr{<img src="/assets/media/c{64}\.png" alt="Directory listing art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/c{64}-480\.png 480w[^"]*/assets/media/c{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'dynamic /directory route renders responsive listing media');
+unlike($public_directory, qr/\Q$stale_image_path\E/, 'dynamic /directory route hides stale image references');
 my $public_detail = _capture_response(sub {
     $app->_dispatch_directory(_directory_request('/directory/civic-arts-center'));
 });
 like($public_detail, qr{Open studios and community programs}, 'public directory detail route renders entry body');
+like($public_detail, qr{<img src="/assets/media/c{64}\.png" alt="Directory listing art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/c{64}-480\.png 480w[^"]*/assets/media/c{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 720px" class="directory-detail-image public-media-img">}, 'dynamic directory detail renders responsive media');
 
 my $submit_response = _capture_response(sub {
     $app->_dispatch_directory(_directory_request('/directory/submit', 'POST', {

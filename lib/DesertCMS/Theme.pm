@@ -108,6 +108,7 @@ sub install_default {
     _ensure_public_event_ticket_wrap_css($dest);
     _ensure_donations_css($dest);
     _ensure_donation_media_fit_css($dest);
+    _ensure_public_module_media_fit_css($dest);
     _ensure_membership_css($dest);
     return 1;
 }
@@ -863,6 +864,25 @@ sub _ensure_donation_media_fit_css {
 .donation-card-media img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .donation-detail-media { display: grid; place-items: center; padding: clamp(12px, 2.4vw, 24px); background: transparent; }
 .donation-detail-media img { width: 100%; height: auto; max-height: min(520px, 70vh); min-height: 0; aspect-ratio: auto; object-fit: contain; object-position: center; }
+CSS
+    close $fh;
+}
+
+sub _ensure_public_module_media_fit_css {
+    my ($dest) = @_;
+    my $path = File::Spec->catfile($dest, 'assets', 'site.css');
+    return unless -f $path;
+    my $body = _read_file($path);
+    return if $body =~ /DesertCMS component upgrade: public module media fit/;
+
+    open my $fh, '>>', $path or die "cannot update theme public module media css $path: $!";
+    print {$fh} <<'CSS';
+
+/* DesertCMS component upgrade: public module media fit. */
+.public-media-img { display: block; width: 100%; background: transparent; }
+.event-card .public-media-img, .shop-card .public-media-img, .showcase-card--image .public-media-img { aspect-ratio: 4 / 3; object-fit: contain; object-position: center; background: transparent; }
+.directory-detail, .booking-detail { display: grid; gap: 24px; }
+.directory-detail-image.public-media-img { justify-self: start; width: min(100%, 820px); max-width: 100%; height: auto; max-height: min(520px, 70vh); object-fit: contain; object-position: center; background: transparent; }
 CSS
     close $fh;
 }

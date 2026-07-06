@@ -5,6 +5,7 @@ use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempdir);
 use Cwd qw(getcwd);
+use JSON::PP qw(encode_json);
 
 use FindBin;
 use lib "$FindBin::Bin/../lib";
@@ -90,6 +91,33 @@ my $service = $bookings->save_service(
 );
 
 my $testimonials = DesertCMS::Testimonials->new(config => $config, db => $db);
+my $testimonial_image_hash = 'f' x 64;
+my $testimonial_image_path = "/assets/media/$testimonial_image_hash.png";
+$db->dbh->do(
+    q{
+        INSERT INTO media_assets
+            (original_name, storage_path, public_path, alt_text, seo_title, seo_description,
+             mime_type, width, height, bytes, checksum_sha256, derivatives_json, created_at)
+        VALUES
+            (?, ?, ?, ?, ?, ?, 'image/png', 1200, 600, 2048, ?, ?, ?)
+    },
+    undef,
+    'testimonial-image.png',
+    "$root/originals/testimonial-image.png",
+    $testimonial_image_path,
+    'Testimonial portrait art',
+    'Testimonial portrait art',
+    'A transparent PNG testimonial image.',
+    $testimonial_image_hash,
+    encode_json({
+        sizes => [
+            { label => 'w480', path => "/assets/media/$testimonial_image_hash-480.png", width => 480, height => 240 },
+            { label => 'display', path => $testimonial_image_path, width => 1200, height => 600 },
+        ],
+        aspect_ratio => '2.000000',
+    }),
+    time,
+);
 my $published = $testimonials->save_testimonial(
     author_name                => 'Casey Client',
     author_title               => 'Program Director',
@@ -103,6 +131,7 @@ my $published = $testimonials->save_testimonial(
     related_directory_entry_id => $entry->{id},
     related_booking_service_id => $service->{id},
     featured                   => 1,
+    image_path                 => $testimonial_image_path,
 );
 ok($published->{id}, 'published testimonial is saved');
 is($published->{rating}, 5, 'testimonial stores optional rating');
@@ -124,6 +153,7 @@ like($testimonials_html, qr{5 stars}, 'testimonials index renders rating label')
 like($testimonials_html, qr{Civic Partner}, 'testimonials index renders byline organization');
 like($testimonials_html, qr{Related to Civic Arts Center}, 'testimonials index renders related directory link label');
 like($testimonials_html, qr{Share a testimonial}, 'testimonials index links submission page');
+like($testimonials_html, qr{<img src="/assets/media/f{64}\.png" alt="Testimonial portrait art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/f{64}-480\.png 480w[^"]*/assets/media/f{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'testimonials index renders responsive testimonial media');
 
 my $submit_html = _read(File::Spec->catfile($root, 'public', 'testimonials', 'submit', 'index.html'));
 like($submit_html, qr{Submit for review}, 'static submission page renders form');
@@ -138,6 +168,9 @@ my $public_index = _capture_response(sub {
     $app->_dispatch_testimonials(_testimonial_request('/testimonials'));
 });
 like($public_index, qr{Client Stories}, 'dynamic /testimonials route renders public page');
+like($public_index, qr{<script src="/assets/site\.js"></script>}, 'dynamic /testimonials route uses the public shell script');
+unlike($public_index, qr{/admin/assets/admin\.css}, 'dynamic /testimonials route does not load admin CSS');
+like($public_index, qr{<img src="/assets/media/f{64}\.png" alt="Testimonial portrait art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/f{64}-480\.png 480w[^"]*/assets/media/f{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px" class="public-media-img">}, 'dynamic /testimonials route renders responsive testimonial media');
 
 my ($before_honeypot) = $db->dbh->selectrow_array(q{SELECT COUNT(*) FROM testimonials});
 my $honeypot = _capture_response(sub {

@@ -115,6 +115,8 @@ Relevant fields include:
 
 Readiness checks look at the selected model, Stripe key, webhook secret, Connect account, plan allowance, and feature-specific state.
 
+The admin `Settings > Payments` page is the shared Stripe readiness hub for Shop / Catalog, Events, Bookings, Membership, and Donations. Module setup pages keep their module-specific pricing or content controls, but they should delegate Stripe readiness and checkout guards to `DesertCMS::Commerce`.
+
 ## Checkout Readiness
 
 Checkout should be enabled only when all required conditions are true.
@@ -132,6 +134,8 @@ Common requirements:
 
 If readiness fails, public checkout POSTs should be rejected and buy controls should be hidden.
 
+Public module routes should still render through the normal public shell when checkout is unavailable. A disabled payment state should never fall back to admin layout assets or bare HTML.
+
 ## Shop / Catalog
 
 Shop / Catalog separates listings from checkout:
@@ -144,7 +148,7 @@ Shop / Catalog separates listings from checkout:
 - Payment-enabled listings can use personal, commercial, and full-rights prices when checkout readiness passes.
 - Checkout POSTs are rejected when Shop Payments is locked or checkout is not ready.
 
-Private source files remain private. Public shop cards use optimized image derivatives.
+Private source files remain private. Public shop cards use optimized image derivatives with responsive `srcset`, dimensions, and transparent PNG or WebP output preserved when the source format supports it.
 
 Full-rights fulfillment can remove an item from sale after purchase.
 
@@ -159,6 +163,8 @@ Events separates calendar participation from paid ticket checkout:
 
 Free RSVP and free ticket records can be created without Stripe. Paid ticket POSTs are rejected unless Event Payments is included and checkout readiness passes.
 
+Public Events listings and details should continue using the public shell even when payment readiness fails. Event card images should use responsive public media derivatives instead of hand-built image URLs.
+
 For contributor marketplace ticketing, checkout uses the master Stripe account, transfers proceeds to the contributor connected account, and retains the configured platform fee. Event ticket orders, RSVP records, and webhook idempotency records are separate from Shop / Catalog orders.
 
 ## Booking Deposits
@@ -171,6 +177,8 @@ Bookings separates service requests from deposit checkout:
 - Event Payments does not unlock booking deposits.
 
 Booking requests can be submitted without Stripe. Deposit checkout is shown only when Booking Deposits is included, the service has a positive deposit amount, and checkout readiness passes.
+
+Public Bookings cards and detail pages should use the media derivative helpers so transparent service art stays intact and stale image references do not render broken URLs.
 
 Booking requests, booking payments, and booking webhook idempotency records are separate from Shop / Catalog and Event payment tables.
 
@@ -198,6 +206,8 @@ Donations separates fundraising campaigns from donation checkout:
 - Event Payments, Booking Deposits, and Membership Payments do not unlock donations.
 
 Campaign pages can render without Stripe. Donation checkout POSTs are rejected unless Donation Payments is included and checkout readiness passes.
+
+Donation campaign images should render from active public media records with responsive derivatives and preserved transparency rather than forcing a flattened JPEG preview.
 
 Donation records and webhook idempotency records are separate from Shop orders, Event ticket orders, Booking deposits, Membership payments, and service billing.
 

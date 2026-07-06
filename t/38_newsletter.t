@@ -165,6 +165,8 @@ my $public_response = _capture_response(sub {
     $app->_dispatch_newsletter(_newsletter_request('/newsletter'));
 });
 like($public_response, qr{Field Notes}, 'dynamic /newsletter route renders public page');
+like($public_response, qr{<script src="/assets/site\.js"></script>}, 'dynamic /newsletter route uses the public shell script');
+unlike($public_response, qr{/admin/assets/admin\.css|href="/admin"}, 'dynamic /newsletter route does not render admin shell assets or links');
 
 my $subscribe_response = _capture_response(sub {
     $app->_dispatch_newsletter(_newsletter_request('/newsletter/subscribe', 'POST', {

@@ -1366,8 +1366,13 @@ sub _events_index {
         my $time = escape_html(DesertCMS::Events::format_time_label($event, $row->{starts_at}, $row->{ends_at}));
         my $location = escape_html($row->{location_label} || '');
         my $location_html = length $location ? qq{<span>$location</span>} : '';
-        my $image = escape_html($row->{feature_image_path} || '');
-        my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . $date . '</div>';
+        my $image = $row->{feature_image_path} || '';
+        my $image_html = $self->_public_media_img_tag(
+            $image,
+            '',
+            class => 'public-media-img',
+            sizes => '(max-width: 760px) 100vw, 360px',
+        ) || '<div class="event-card-date" aria-hidden="true">' . $date . '</div>';
         $cards .= <<"HTML";
 <a class="event-card" href="$url">
   $image_html
@@ -1777,7 +1782,7 @@ sub _directory_index {
     my $kind = $request ? ($request->param('kind') || '') : '';
     my $entries = $self->{directory}->published_entries(kind => $kind, limit => 500);
     my $kind_nav = _directory_public_kind_nav($self->{directory}->public_kinds, $kind);
-    my $cards = join '', map { _directory_public_card($_) } @{$entries};
+    my $cards = join '', map { $self->_directory_public_card($_) } @{$entries};
     $cards ||= '<p class="events-empty">No directory entries yet.</p>';
     my $notice = $message ? '<p class="' . ($is_error ? 'events-notice is-error' : 'events-notice') . '">' . escape_html($message) . '</p>' : '';
     my $submit = _setting_truthy($settings->{directory_submissions_enabled})
@@ -1800,7 +1805,14 @@ sub _directory_index {
   </section>
 </article>
 HTML
-    return $self->_html_response($title, $body);
+    return $self->_public_module_response(
+        title       => $title,
+        description => $intro,
+        path        => '/directory/',
+        content     => $body,
+        context     => 'directory',
+        status      => $is_error ? 400 : 200,
+    );
 }
 
 sub _directory_detail {
@@ -1811,8 +1823,14 @@ sub _directory_detail {
     my $kind = escape_html(DesertCMS::Directory::kind_label($entry->{kind}));
     my $body_text = escape_html($entry->{body} || '');
     $body_text =~ s/\n/<br>/g;
-    my $image = escape_html($entry->{image_path} || '');
-    my $image_html = length $image ? qq{<img class="directory-detail-image" src="$image" alt="">} : '';
+    my $image = $entry->{image_path} || '';
+    my $image_html = $self->_public_media_img_tag(
+        $image,
+        '',
+        class => 'directory-detail-image public-media-img',
+        loading => 'eager',
+        sizes => '(max-width: 760px) 100vw, 720px',
+    );
     my $contact = _directory_contact_html($entry);
     my $terms = _directory_terms_html($entry);
     my $location = _directory_location_html($entry);
@@ -1831,7 +1849,14 @@ sub _directory_detail {
   <p><a href="/directory/">Back to directory</a></p>
 </article>
 HTML
-    return $self->_html_response($entry->{title} || 'Directory entry', $body);
+    return $self->_public_module_response(
+        title       => $entry->{title} || 'Directory entry',
+        description => $entry->{summary} || '',
+        path        => '/directory/' . ($entry->{slug} || '') . '/',
+        content     => $body,
+        context     => 'directory',
+        status      => $is_error ? 400 : 200,
+    );
 }
 
 sub _directory_submit_page {
@@ -1869,7 +1894,14 @@ sub _directory_submit_page {
   </form>
 </article>
 HTML
-    return $self->_html_response('Suggest a Listing', $body);
+    return $self->_public_module_response(
+        title       => 'Suggest a Listing',
+        description => 'Suggest a directory listing for review.',
+        path        => '/directory/submit/',
+        content     => $body,
+        context     => 'directory',
+        status      => $is_error ? 400 : 200,
+    );
 }
 
 sub _directory_submit {
@@ -1910,13 +1942,18 @@ sub _directory_public_kind_nav {
 }
 
 sub _directory_public_card {
-    my ($entry) = @_;
+    my ($self, $entry) = @_;
     my $slug = escape_html($entry->{slug} || '');
     my $title = escape_html($entry->{title} || 'Directory entry');
     my $summary = escape_html($entry->{summary} || '');
     my $kind = escape_html(DesertCMS::Directory::kind_label($entry->{kind}));
-    my $image = escape_html($entry->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
+    my $image = $entry->{image_path} || '';
+    my $image_html = $self->_public_media_img_tag(
+        $image,
+        '',
+        class => 'public-media-img',
+        sizes => '(max-width: 760px) 100vw, 360px',
+    ) || '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
     my $location = escape_html($entry->{location_label} || '');
     my $location_html = length $location ? qq{<span>$location</span>} : '';
     return <<"HTML";
@@ -2010,7 +2047,7 @@ sub _bookings_index {
     my $title = $settings->{bookings_title} || 'Bookings';
     my $intro = $settings->{bookings_intro} || 'Request appointments, consultations, service sessions, venue time, or project meetings.';
     my $services = $self->{bookings}->published_services(limit => 500);
-    my $cards = join '', map { _booking_public_card($_) } @{$services};
+    my $cards = join '', map { $self->_booking_public_card($_) } @{$services};
     $cards ||= '<p class="events-empty">No booking services are available yet.</p>';
     my $notice = $message ? '<p class="' . ($is_error ? 'events-notice is-error' : 'events-notice') . '">' . escape_html($message) . '</p>' : '';
     my $safe_title = escape_html($title);
@@ -2028,7 +2065,14 @@ sub _bookings_index {
   </section>
 </article>
 HTML
-    return $self->_html_response($title, $body);
+    return $self->_public_module_response(
+        title       => $title,
+        description => $intro,
+        path        => '/bookings/',
+        content     => $body,
+        context     => 'bookings',
+        status      => $is_error ? 400 : 200,
+    );
 }
 
 sub _bookings_detail {
@@ -2041,8 +2085,14 @@ sub _bookings_detail {
     $body_text =~ s/\n/<br>/g;
     my $availability = escape_html($service->{availability_text} || '');
     $availability =~ s/\n/<br>/g;
-    my $image = escape_html($service->{image_path} || '');
-    my $image_html = length $image ? qq{<img class="directory-detail-image" src="$image" alt="">} : '';
+    my $image = $service->{image_path} || '';
+    my $image_html = $self->_public_media_img_tag(
+        $image,
+        '',
+        class => 'directory-detail-image public-media-img',
+        loading => 'eager',
+        sizes => '(max-width: 760px) 100vw, 720px',
+    );
     my $meta = _booking_public_meta($service);
     my $notice = $message ? '<p class="' . ($is_error ? 'events-notice is-error' : 'events-notice') . '">' . escape_html($message) . '</p>' : '';
     my $form = _booking_public_request_form($self, $service, $settings);
@@ -2063,7 +2113,14 @@ sub _bookings_detail {
   <p><a href="/bookings/">Back to bookings</a></p>
 </article>
 HTML
-    return $self->_html_response($service->{title} || 'Booking service', $body);
+    return $self->_public_module_response(
+        title       => $service->{title} || 'Booking service',
+        description => $service->{summary} || '',
+        path        => '/bookings/' . ($service->{slug} || '') . '/',
+        content     => $body,
+        context     => 'bookings',
+        status      => $is_error ? 400 : 200,
+    );
 }
 
 sub _booking_request_submit {
@@ -2163,13 +2220,18 @@ sub _bookings_stripe_webhook {
 }
 
 sub _booking_public_card {
-    my ($service) = @_;
+    my ($self, $service) = @_;
     my $slug = escape_html($service->{slug} || '');
     my $title = escape_html($service->{title} || 'Booking service');
     my $summary = escape_html($service->{summary} || '');
     my $kind = escape_html(DesertCMS::Bookings::service_kind_label($service->{service_kind}));
-    my $image = escape_html($service->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
+    my $image = $service->{image_path} || '';
+    my $image_html = $self->_public_media_img_tag(
+        $image,
+        '',
+        class => 'public-media-img',
+        sizes => '(max-width: 760px) 100vw, 360px',
+    ) || '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
     my $location = escape_html($service->{location_label} || '');
     my $location_html = length $location ? qq{<span>$location</span>} : '';
     return <<"HTML";
@@ -2742,13 +2804,19 @@ sub _shop_catalog {
         my $title = escape_html($item->{title} || $item->{original_name} || 'Catalog item');
         my $description = escape_html($item->{description} || '');
         $description =~ s/\n/<br>/g;
-        my $image = escape_html($item->{public_path} || '');
-        my $alt = escape_html($item->{alt_text} || $item->{title} || '');
+        my $image = $item->{public_path} || '';
+        my $alt = $item->{alt_text} || $item->{title} || '';
         my $kind = escape_html(DesertCMS::Shop->listing_kind_label($item->{listing_kind}));
         my $cta_label = escape_html($item->{cta_label} || 'Request info');
         my $cta_url = escape_html($item->{cta_url} || '');
         my $listing_id = int($item->{id});
         my $desc_html = length $description ? qq{<p>$description</p>} : '';
+        my $image_html = $self->_public_media_img_tag(
+            $image,
+            $alt,
+            class => 'public-media-img',
+            sizes => '(max-width: 760px) 100vw, 360px',
+        ) || '<div class="event-card-date" aria-hidden="true">' . substr($kind, 0, 1) . '</div>';
         my $buttons = '';
         if ($checkout_ready) {
             for my $option (@{DesertCMS::Shop->rights_options($item)}) {
@@ -2783,7 +2851,7 @@ HTML
         }
         $cards .= <<"HTML";
 <article class="shop-card">
-  <img src="$image" alt="$alt" loading="lazy">
+  $image_html
   <div class="shop-card-body">
     <span class="shop-kind">$kind</span>
     <h2>$title</h2>
@@ -3502,8 +3570,28 @@ sub _shop_html_response {
         headers => {
             'Content-Type' => 'text/html; charset=utf-8',
             'Cache-Control' => 'no-store',
+            security_headers(),
         },
         body => $body,
+    );
+}
+
+sub _public_module_response {
+    my ($self, %args) = @_;
+    my $html = DesertCMS::Renderer::render_module_page($self->{config}, $self->{db}, {
+        title       => $args{title} || 'DesertCMS',
+        description => $args{description} || '',
+        path        => $args{path} || '/',
+        content     => $args{content} || '',
+        context     => $args{context} || 'module',
+    });
+    return DesertCMS::HTTP->response(
+        status  => $args{status} || 200,
+        headers => {
+            'Content-Type' => 'text/html; charset=utf-8',
+            security_headers(),
+        },
+        body => $html,
     );
 }
 
@@ -11696,7 +11784,9 @@ sub _settings_payments_save {
 sub _payment_module_rows {
     my ($self, $settings, $commerce, $billing) = @_;
     $settings ||= {};
-    $commerce ||= DesertCMS::Commerce::readiness($self->{config}, $settings);
+    my $payments = DesertCMS::Commerce::payment_hub_readiness($self->{config}, $settings);
+    my %workflow = map { $_->{workflow} => $_ } @{ $payments->{workflows} || [] };
+    $commerce ||= $workflow{shop} || DesertCMS::Commerce::readiness($self->{config}, $settings);
     $billing ||= $self->{service_plans}->billing_readiness($settings);
     my $billing_ready = $billing->{ready} ? 1 : 0;
     my $priced = int($billing->{priced_plans} || 0);
@@ -11725,7 +11815,7 @@ sub _payment_module_rows {
             surface => '/events checkout and /events/stripe/webhook',
             feature => 'events',
             payment => 'event_payments',
-            readiness => $self->{events}->payment_readiness,
+            readiness => $workflow{events},
             provider => 'Shared Stripe settings',
             override => 'Ticket/deposit pricing stays with each event.',
         },
@@ -11735,7 +11825,7 @@ sub _payment_module_rows {
             surface => '/bookings checkout and /bookings/stripe/webhook',
             feature => 'bookings',
             payment => 'booking_payments',
-            readiness => $self->{bookings}->payment_readiness,
+            readiness => $workflow{bookings},
             provider => 'Shared Stripe settings',
             override => 'Deposit requirements and service pricing stay in Bookings.',
         },
@@ -11745,7 +11835,7 @@ sub _payment_module_rows {
             surface => '/members/payments/checkout',
             feature => 'membership',
             payment => 'membership_payments',
-            readiness => $self->{membership}->payment_readiness,
+            readiness => $workflow{membership},
             provider => 'Shared Stripe settings',
             override => 'Checkout fulfillment remains reserved for the Membership Payments expansion.',
         },
@@ -11755,7 +11845,7 @@ sub _payment_module_rows {
             surface => '/donate checkout and /donate/stripe/webhook',
             feature => 'donations',
             payment => 'donation_payments',
-            readiness => $self->{donations}->payment_readiness,
+            readiness => $workflow{donations},
             provider => 'Shared Stripe settings',
             override => 'Campaign goals, suggested amounts, and donor export stay in Donations.',
         },
@@ -12239,7 +12329,7 @@ sub _provider_health_cards {
     my $domain_root = $settings->{contributor_domain_root} || $site_host;
     my $postmark_ready = ($settings->{postmark_from_email} || '') && ($settings->{postmark_server_token} || '');
     my $review_inbox_ready = ($settings->{contributor_request_recipient_email} || '') ? 1 : 0;
-    my $commerce = DesertCMS::Commerce::readiness($self->{config}, $settings);
+    my $commerce = DesertCMS::Commerce::payment_hub_readiness($self->{config}, $settings);
     my $google_ready = ($settings->{google_oauth_refresh_token} || '') && ($settings->{google_search_console_property} || '');
     my $indexnow_enabled = $settings->{indexnow_enabled} ? 1 : 0;
     my $indexnow_ready = $indexnow_enabled && ($settings->{indexnow_key} || '');
@@ -12335,7 +12425,7 @@ sub _provider_readiness_detail_panels {
     my ($self, $settings) = @_;
     $settings ||= {};
     my $email = email_readiness($self->{config}, $self->{db});
-    my $commerce = DesertCMS::Commerce::readiness($self->{config}, $settings);
+    my $commerce = DesertCMS::Commerce::payment_hub_readiness($self->{config}, $settings);
     my $email_rows = _provider_readiness_check_rows($email->{checks}, label_key => 'label', status_key => 'status');
     my $commerce_rows = _provider_readiness_check_rows($commerce->{checks}, label_key => 'title', status_key => 'label');
     my $postmark_endpoint = length($settings->{postmark_webhook_token} || '')
@@ -16414,6 +16504,7 @@ sub _public_media_img_tag {
         push @attrs, 'srcset="' . escape_html($srcset) . '"';
         push @attrs, 'sizes="' . escape_html($opts{sizes} || '(max-width: 760px) 100vw, 1120px') . '"';
     }
+    push @attrs, 'class="' . escape_html($opts{class}) . '"' if defined $opts{class} && length $opts{class};
     return '<img ' . join(' ', @attrs) . '>';
 }
 
@@ -16938,7 +17029,7 @@ sub _testimonials_index {
     my ($self, $request, $settings, $message, $is_error) = @_;
     my $title = $settings->{testimonials_title} || 'Testimonials';
     my $intro = $settings->{testimonials_intro} || 'Reviews, recommendations, client stories, customer feedback, and community praise.';
-    my $cards = join '', map { _testimonial_public_card($_) } @{ $self->{testimonials}->published_testimonials(limit => 500) };
+    my $cards = join '', map { $self->_testimonial_public_card($_) } @{ $self->{testimonials}->published_testimonials(limit => 500) };
     $cards ||= '<p class="events-empty">No testimonials yet.</p>';
     my $submit = _setting_truthy($settings->{testimonials_submissions_enabled})
         ? '<a class="module-action-link" href="/testimonials/submit/">Share a testimonial</a>'
@@ -17038,7 +17129,7 @@ sub _testimonials_public_response {
 }
 
 sub _testimonial_public_card {
-    my ($row) = @_;
+    my ($self, $row) = @_;
     my $author = escape_html($row->{author_name} || 'Reviewer');
     my $quote = escape_html($row->{quote} || '');
     my $body = escape_html($row->{body} || '');
@@ -17049,8 +17140,13 @@ sub _testimonial_public_card {
     my $source = escape_html(DesertCMS::Testimonials::source_type_label($row->{source_type}));
     my $related = escape_html($row->{related_directory_title} || $row->{related_booking_title} || '');
     my $related_html = length $related ? "<small>Related to $related</small>" : '';
-    my $image = escape_html($row->{image_path} || '');
-    my $image_html = length $image ? qq{<img src="$image" alt="" loading="lazy">} : '<div class="event-card-date" aria-hidden="true">"' . substr($author, 0, 1) . '</div>';
+    my $image = $row->{image_path} || '';
+    my $image_html = $self->_public_media_img_tag(
+        $image,
+        '',
+        class => 'public-media-img',
+        sizes => '(max-width: 760px) 100vw, 360px',
+    ) || '<div class="event-card-date" aria-hidden="true">' . substr($author, 0, 1) . '</div>';
     return <<"HTML";
 <article class="event-card directory-card testimonial-card">
   $image_html
@@ -20165,7 +20261,14 @@ sub _invite_accept_get {
   <p>This invite is expired, revoked, or already accepted.</p>
 </section>
 };
-        return $self->_html_response('Invite Unavailable', $body);
+        return $self->_public_module_response(
+            title       => 'Invite Unavailable',
+            description => 'This contributor invite is unavailable.',
+            path        => '/admin/invite/' . $token,
+            content     => $body,
+            context     => 'contributors',
+            status      => 410,
+        );
     }
 
     my $notice = $message ? '<p class="notice error">' . escape_html($message) . '</p>' : '';
@@ -20188,7 +20291,13 @@ sub _invite_accept_get {
   </form>
 </section>
 HTML
-    return $self->_html_response('Create Contributor Site', $body);
+    return $self->_public_module_response(
+        title       => 'Create Contributor Site',
+        description => 'Accept a contributor invite and request a site.',
+        path        => '/admin/invite/' . $token,
+        content     => $body,
+        context     => 'contributors',
+    );
 }
 
 sub _invite_accept_post {
@@ -20214,7 +20323,13 @@ sub _invite_accept_post {
   <p><strong>$domain</strong></p>
 </section>
 HTML
-    return $self->_html_response('Site Requested', $body);
+    return $self->_public_module_response(
+        title       => 'Site Requested',
+        description => 'Your contributor site request has been received.',
+        path        => '/admin/invite/' . $token,
+        content     => $body,
+        context     => 'contributors',
+    );
 }
 
 sub _send_password_reset_email {
