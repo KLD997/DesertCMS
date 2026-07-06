@@ -2871,8 +2871,10 @@ sub _write_donation_detail_page {
     my $image_html = '';
     if (DesertCMS::Media::is_public_image_path($image)) {
         my $asset = _media_asset_for_path($db, $image);
-        my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager');
-        $image_html = qq{<figure class="donation-detail-media">$img</figure>};
+        if ($asset->{public_path}) {
+            my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager');
+            $image_html = qq{<figure class="donation-detail-media">$img</figure>};
+        }
     }
     my $progress = _donation_static_progress($campaign);
     my $form = _donation_static_form($donations, $campaign);
@@ -2943,11 +2945,14 @@ sub _donation_static_card {
     my $image_html;
     if (DesertCMS::Media::is_public_image_path($image)) {
         my $asset = _media_asset_for_path($db, $image);
-        my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 360px');
-        $image_html = qq{<span class="donation-card-media">$img</span>};
+        if ($asset->{public_path}) {
+            my $img = _media_img_tag($image, '', $asset, sizes => '(max-width: 760px) 100vw, 360px');
+            $image_html = qq{<span class="donation-card-media">$img</span>};
+        }
     } else {
         $image_html = qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
     }
+    $image_html ||= qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
     return <<"HTML";
 <a class="donation-card" href="/donate/$slug/">
   $image_html

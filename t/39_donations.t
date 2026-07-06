@@ -144,6 +144,15 @@ my $auto_slug_campaign = $donations->save_campaign(
     summary => 'Draft fundraiser.',
 );
 is($auto_slug_campaign->{slug}, 'community-kitchen', 'donation campaign slug defaults to the campaign title instead of untitled');
+my $stale_image_path = '/assets/media/' . ('e' x 64) . '.jpg';
+my $stale_image_campaign = $donations->save_campaign(
+    title      => 'Stale Image Campaign',
+    slug       => 'stale-image-campaign',
+    status     => 'published',
+    summary    => 'Campaign with deleted media.',
+    image_path => $stale_image_path,
+);
+ok($stale_image_campaign->{id}, 'donation campaign can retain a stale legacy image path for repair-safe rendering');
 
 $content->rebuild_all;
 ok(-f File::Spec->catfile($root, 'public', 'donate', 'index.html'), 'donations index is generated');
@@ -160,6 +169,8 @@ like($donate_html, qr{class="content module-page donations-page donations-shell"
 like($donate_html, qr{How to give.*Choose a campaign.*Select an amount.*Donate securely}s, 'donations index explains how visitors can donate');
 like($donate_html, qr{class="donation-card".*Open campaign.*Give to this campaign}s, 'donations index campaign card has obvious campaign and donation actions');
 like($donate_html, qr{donation-card-media"><img src="/assets/media/d{64}\.png" alt="Transparent campaign art" loading="lazy" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/d{64}-480\.png 480w[^"]*/assets/media/d{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 360px">}, 'donations index campaign card renders transparent PNG media responsively');
+unlike($donate_html, qr{\Q$stale_image_path\E}, 'donations index does not render stale deleted campaign image paths');
+like($donate_html, qr{donation-card-media--empty.*Stale Image Campaign}s, 'donations index uses clean placeholder for stale campaign media');
 
 my $detail_html = _read(File::Spec->catfile($root, 'public', 'donate', 'archive-fund', 'index.html'));
 like($detail_html, qr{Funds support scanning}, 'donation detail renders campaign body');
@@ -168,6 +179,9 @@ like($detail_html, qr{donation-detail-media"><img src="/assets/media/d{64}\.png"
 like($detail_html, qr{USD 0\.00.*of USD 5000\.00 goal}s, 'donation detail renders goal progress');
 like($detail_html, qr{Online donations are not available}, 'donation detail hides checkout when payments are not ready');
 unlike($detail_html, qr{Donate with Stripe}, 'donation detail omits Stripe button when checkout is unavailable');
+my $stale_detail_html = _read(File::Spec->catfile($root, 'public', 'donate', 'stale-image-campaign', 'index.html'));
+unlike($stale_detail_html, qr{\Q$stale_image_path\E}, 'donation detail does not render stale deleted campaign image paths');
+unlike($stale_detail_html, qr{donation-detail-media}, 'donation detail omits stale campaign media frame');
 like(DesertCMS::Donations::campaign_body_html("What Donations Support\n\nCore improvements\nDocumentation\nOpenBSD testing"), qr{<h3>What Donations Support</h3>.*<ul class="donation-body-list">.*<li>Core improvements</li>.*<li>OpenBSD testing</li>}s, 'donation campaign body formatter upgrades plain headings and lists');
 
 my $sitemap = _read(File::Spec->catfile($root, 'public', 'sitemap.xml'));
@@ -190,6 +204,11 @@ unlike($public_detail, qr{document\.querySelector\('\[data-theme-toggle\]'\)}, '
 like($public_detail, qr{donation-detail-media"><img src="/assets/media/d{64}\.png" alt="Transparent campaign art" loading="eager" decoding="async" width="1200" height="600" srcset="[^"]*/assets/media/d{64}-480\.png 480w[^"]*/assets/media/d{64}\.png 1200w" sizes="\(max-width: 760px\) 100vw, 460px">}, 'dynamic donation detail route renders transparent PNG media responsively');
 unlike($public_detail, qr{/admin/assets/admin\.css|href="/admin"}, 'dynamic donation detail route does not expose the admin shell or admin brand link');
 like($public_detail, qr{donation-panel--unavailable}, 'dynamic donation detail route renders styled unavailable payment state');
+my $stale_public_detail = _capture_response(sub {
+    $app->_dispatch_donations(_donation_request('/donate/stale-image-campaign'));
+});
+unlike($stale_public_detail, qr{\Q$stale_image_path\E}, 'dynamic donation detail route does not render stale deleted campaign image paths');
+unlike($stale_public_detail, qr{donation-detail-media}, 'dynamic donation detail route omits stale campaign media frame');
 
 my $admin_html = _capture_response(sub {
     $app->_module_donations_settings_page(undef, { username => 'admin', role => 'owner' }, 'donations-session');

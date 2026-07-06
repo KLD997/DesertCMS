@@ -16225,9 +16225,10 @@ sub _donation_detail {
     my $summary = escape_html($campaign->{summary} || '');
     my $body_text = DesertCMS::Donations::campaign_body_html($campaign->{body} || $campaign->{summary} || '');
     my $image = $campaign->{image_path} || '';
-    my $image_html = DesertCMS::Media::is_public_image_path($image)
-        ? qq{<figure class="donation-detail-media">} . $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager') . qq{</figure>}
+    my $image_tag = DesertCMS::Media::is_public_image_path($image)
+        ? $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 460px', loading => 'eager')
         : '';
+    my $image_html = length $image_tag ? qq{<figure class="donation-detail-media">$image_tag</figure>} : '';
     my $progress = $self->_donation_progress_html($campaign);
     my $form = $self->_donation_form_html($campaign);
     my $notice = $message ? '<p class="' . ($is_error ? 'notice error' : 'notice') . '">' . escape_html($message) . '</p>' : '';
@@ -16359,8 +16360,11 @@ sub _donation_campaign_card {
         ? qq{<div class="donation-meter" aria-hidden="true"><span style="width: $pct%"></span></div>}
         : '';
     my $image = $campaign->{image_path} || '';
-    my $image_html = DesertCMS::Media::is_public_image_path($image)
-        ? qq{<span class="donation-card-media">} . $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 360px') . qq{</span>}
+    my $image_tag = DesertCMS::Media::is_public_image_path($image)
+        ? $self->_public_media_img_tag($image, '', sizes => '(max-width: 760px) 100vw, 360px')
+        : '';
+    my $image_html = length $image_tag
+        ? qq{<span class="donation-card-media">$image_tag</span>}
         : qq{<span class="donation-card-media donation-card-media--empty" aria-hidden="true"><span>Give</span></span>};
     return <<"HTML";
 <a class="donation-card" href="/donate/$slug/">
@@ -16393,6 +16397,7 @@ sub _public_media_img_tag {
         undef,
         $src
     ) || {};
+    return '' unless $asset->{public_path};
     $alt = $asset->{alt_text} || '' unless defined $alt && length $alt;
     my @attrs = (
         'src="' . escape_html($src) . '"',
