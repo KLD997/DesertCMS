@@ -10,8 +10,6 @@ It is built around three major ideas:
 - **OpenBSD security standards**: deploy with conservative defaults, local files, SQLite, `httpd`, `slowcgi`, `pf`, and validation tooling.
 - **Adaptability**: use the same system for sites, catalogs, portfolios, docs hubs, memberships, events, directories, bookings, newsletters, donations, and more.
 
-The formal hosted site is [desertcms.com](https://desertcms.com/).
-
 Current release: DesertCMS v2.0.2. This patch release fixes public module rendering, shared Stripe readiness, responsive media handling, and the recent donation and commerce checkout regressions.
 
 ## Documentation
